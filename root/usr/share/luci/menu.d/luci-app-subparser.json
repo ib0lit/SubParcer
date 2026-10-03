@@ -1,0 +1,12 @@
+{
+    "admin/services/subparser": {
+        "title": "SubParser",
+        "action": {
+            "type": "view",
+            "path": "subparser"
+        },
+        "depends": {
+            "uci": { "subparser": true }
+        }
+    }
+}

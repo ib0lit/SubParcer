@@ -1,0 +1,35 @@
+{
+  "luci-app-subparser": {
+    "description": "Grant access to SubParser RPC methods",
+    "read": {
+      "file": {
+        "/tmp/*": [
+          "read"
+        ]
+      },
+      "uci": [
+        "subparser",
+        "podkop"
+      ]
+    },
+    "write": {
+      "file": {
+        "/tmp/*": [
+          "write"
+        ]
+      },
+      "uci": [
+        "subparser",
+        "podkop"
+      ],
+      "exec": {
+        "/usr/bin/subparser-helper.sh": [
+          "*"
+        ],
+        "/etc/init.d/subparser": [
+          "restart"
+        ]
+      }
+    }
+  }
+}

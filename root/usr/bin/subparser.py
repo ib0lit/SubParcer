@@ -1,0 +1,498 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import sys
+import os
+import time
+import json
+import socket
+import ssl
+import gzip
+import base64
+import subprocess
+import urllib.request
+import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+CONFIG_NAME = "subparser"
+SINGBOX_BIN = "/usr/bin/sing-box"
+TEST_URL = "https://cp.cloudflare.com/generate_204"
+MAX_WORKERS = 12
+HWID_PHONE = "f4c9b1a0d8e27365"
+
+UA_MAP = {
+    "v2rayN": "v2rayN/6.23",
+    "ClashMeta": "ClashMeta/1.18.0",
+    "SingBox": "sing-box/1.9.0",
+    "Shadowrocket": "Shadowrocket/2.2.0",
+    "NekoBox": "NekoBox/1.3.1"
+}
+
+def send_telegram_notify(text):
+    try:
+        token = subprocess.check_output(["uci", "-q", "get", f"{CONFIG_NAME}.settings.tg_bot_token"], text=True).strip()
+        chat_id = subprocess.check_output(["uci", "-q", "get", f"{CONFIG_NAME}.settings.tg_chat_id"], text=True).strip()
+        if not token or not chat_id:
+            return
+
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        data = urllib.parse.urlencode({"chat_id": chat_id, "text": text, "parse_mode": "HTML"}).encode("utf-8")
+        time.sleep(5)
+
+        for attempt in range(1, 6):
+            try:
+                req = urllib.request.Request(url, data=data, headers={"User-Agent": "OpenWrt-SubParser"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status == 200:
+                        print("[OK] Уведомление в Telegram успешно доставлено.")
+                        return
+            except Exception as net_err:
+                if attempt == 5:
+                    print(f"[!] Ошибка отправки в Telegram (попытка {attempt}/5): {net_err}")
+                time.sleep(3)
+    except Exception as e:
+        print(f"[!] Ошибка Telegram: {e}")
+
+def find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
+
+def get_uci(option, default=""):
+    try:
+        out = subprocess.check_output(["uci", "-q", "get", f"{CONFIG_NAME}.settings.{option}"], text=True).strip()
+        return out if out else default
+    except Exception:
+        return default
+
+def get_subscriptions():
+    try:
+        raw = subprocess.check_output(["uci", "-q", "export", CONFIG_NAME], text=True)
+    except Exception:
+        return []
+    
+    subs = []
+    current = None
+    for line in raw.splitlines():
+        line = line.strip()
+        if line.startswith("config subscription"):
+            if current and current.get("url"):
+                subs.append(current)
+            current = {"enabled": "1", "user_agent": "v2rayN", "name": "Подписка"}
+        elif current is not None:
+            if line.startswith("option url "):
+                current["url"] = line.split("option url ", 1)[1].strip("'\" ")
+            elif line.startswith("option user_agent "):
+                current["user_agent"] = line.split("option user_agent ", 1)[1].strip("'\" ")
+            elif line.startswith("option enabled "):
+                current["enabled"] = line.split("option enabled ", 1)[1].strip("'\" ")
+            elif line.startswith("option name "):
+                current["name"] = line.split("option name ", 1)[1].strip("'\" ")
+    if current and current.get("url"):
+        subs.append(current)
+    return subs
+
+def is_ru_node(name: str) -> bool:
+    nl = name.lower()
+    return "🇷🇺" in name or "\U0001F1F7\U0001F1FA" in name or "обход" in nl or any(x in nl for x in [" ru ", "russia", "россия"])
+
+GLOBAL_SUB_USERINFO = {}
+
+def format_bytes(size):
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if abs(size) < 1024.0:
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} PB"
+
+def parse_userinfo_header(info_str):
+    res = {}
+    for part in info_str.split(';'):
+        if '=' in part:
+            k, v = part.strip().split('=', 1)
+            try: res[k.lower()] = int(v)
+            except Exception: pass
+    return res
+
+def fetch_single_sub(sub_info: dict) -> list:
+    url = sub_info.get("url", "").strip()
+    if not url:
+        return []
+    ua_key = sub_info.get("user_agent", "v2rayN")
+    ua = UA_MAP.get(ua_key, UA_MAP["v2rayN"])
+    name = sub_info.get("name", "Подписка")
+
+    print(f"[{name}] Запрос подписки через {ua_key}...")
+
+    headers = {
+        "User-Agent": ua,
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept-Language": "ru-RU,ru;q=0.9",
+        "x-hwid": HWID_PHONE,
+        "hwid": HWID_PHONE,
+        "device-id": HWID_PHONE,
+        "x-device-os": "Android",
+        "x-ver-os": "16",
+        "x-device-model": "Xiaomi 2412DPC0AG",
+        "device-model": "Xiaomi 2412DPC0AG"
+    }
+
+    raw_data = None
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+            raw_data = resp.read()
+            u_info = resp.headers.get("subscription-userinfo") or resp.headers.get("Subscription-Userinfo")
+            if u_info:
+                GLOBAL_SUB_USERINFO[name] = parse_userinfo_header(u_info)
+            if resp.info().get("Content-Encoding") == "gzip" or raw_data[:2] == b"\x1f\x8b":
+                try:
+                    raw_data = gzip.decompress(raw_data)
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"  [!] urllib error ({e}), пробуем curl...")
+
+    if not raw_data:
+        try:
+            curl_cmd = [
+                "curl", "-sL", "-k", "-m", "15",
+                "-H", f"User-Agent: {ua}",
+                "-H", f"x-hwid: {HWID_PHONE}",
+                "-H", f"device-id: {HWID_PHONE}",
+                "-H", "x-device-os: Android",
+                "-H", "x-device-model: Xiaomi 2412DPC0AG",
+                "--compressed", url
+            ]
+            res = subprocess.run(curl_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if res.returncode == 0 and res.stdout:
+                raw_data = res.stdout
+        except Exception:
+            pass
+
+    if not raw_data:
+        print(f"  [!] Не удалось загрузить подписку {name}")
+        return []
+
+    try:
+        pad = len(raw_data) % 4
+        if pad:
+            raw_data += b"=" * (4 - pad)
+        text = base64.b64decode(raw_data).decode('utf-8', errors='ignore')
+    except Exception:
+        text = raw_data.decode('utf-8', errors='ignore')
+
+    t_low = text.lower()
+    if "не поддерживается" in t_low or "update your client" in t_low:
+        print(f"  [!] Сервер вернул заглушку для {name}.")
+        return []
+
+    found = []
+    for l in text.splitlines():
+        l_clean = l.strip()
+        if "://" in l_clean and "0.0.0.0" not in l_clean:
+            found.append(l_clean)
+
+    print(f"  [OK] Из подписки '{name}' получено {len(found)} боевых узлов.")
+    return found
+
+def query_node_delay(api_port: int, tag: str, timeout_ms: int = 3500) -> int:
+    encoded_tag = urllib.parse.quote(tag)
+    encoded_url = urllib.parse.quote(TEST_URL, safe="")
+    api_url = f"http://127.0.0.1:{api_port}/proxies/{encoded_tag}/delay?url={encoded_url}&timeout={timeout_ms}"
+    try:
+        req = urllib.request.Request(api_url)
+        with urllib.request.urlopen(req, timeout=(timeout_ms / 1000.0) + 1.0) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return int(data.get("delay", -1))
+    except Exception:
+        return -1
+
+def parse_link_to_singbox_outbound(link: str, tag: str) -> dict:
+    parsed = urllib.parse.urlsplit(link)
+    scheme = parsed.scheme.lower()
+    query = urllib.parse.parse_qs(parsed.query)
+
+    netloc = parsed.netloc
+    auth, host_port = "", netloc
+    if "@" in netloc:
+        auth, host_port = netloc.split("@", 1)
+
+    if host_port.startswith("["):
+        parts = host_port.split("]")
+        server = parts[0][1:]
+        port = int(parts[1][1:]) if len(parts) > 1 and parts[1].startswith(":") else 443
+    elif ":" in host_port:
+        parts = host_port.split(":")
+        server = parts[0]
+        port = int(parts[1]) if parts[1].isdigit() else 443
+    else:
+        server = host_port
+        port = 443
+
+    outbound = {
+        "type": "vless" if scheme == "vless" else ("trojan" if scheme == "trojan" else "hysteria2"),
+        "tag": tag,
+        "server": server,
+        "server_port": port,
+    }
+
+    sni = query.get("sni", [query.get("peer", [server])[0]])[0] or server
+    alpn_raw = query.get("alpn", [""])[0]
+    alpn = [p.strip() for p in alpn_raw.split(",") if p.strip()] if alpn_raw else []
+    insecure = query.get("allowInsecure", ["0"])[0] in ("1", "true")
+    fp = query.get("fp", ["chrome"])[0] or "chrome"
+
+    transport_type = query.get("type", [query.get("net", ["tcp"])[0]])[0].lower()
+    transport_obj = None
+
+    if transport_type == "ws":
+        transport_obj = {"type": "ws", "path": query.get("path", ["/"])[0], "headers": {"Host": query.get("host", [sni])[0]}}
+    elif transport_type in ("grpc", "gun"):
+        transport_obj = {"type": "grpc", "service_name": query.get("serviceName", [query.get("path", [""])[0]])[0]}
+    elif transport_type in ("http", "tcp") and query.get("headerType", ["none"])[0].lower() == "http":
+        transport_obj = {"type": "http", "host": [query.get("host", [sni])[0]], "path": query.get("path", ["/"])[0]}
+    elif transport_type in ("httpupgrade", "upgrade"):
+        transport_obj = {"type": "httpupgrade", "host": query.get("host", [sni])[0], "path": query.get("path", ["/"])[0]}
+
+    if scheme == "vless":
+        outbound["uuid"] = auth
+        flow = query.get("flow", [""])[0]
+        if flow:
+            outbound["flow"] = flow
+        sec = query.get("security", [""])[0].lower()
+        if sec == "reality":
+            outbound["tls"] = {
+                "enabled": True, "server_name": sni,
+                "reality": {"enabled": True, "public_key": query.get("pbk", [query.get("publicKey", [""])[0]])[0], "short_id": query.get("sid", [query.get("shortId", [""])[0]])[0]},
+                "utls": {"enabled": True, "fingerprint": fp}
+            }
+        elif sec in ("tls", "ssl"):
+            tls_cfg = {"enabled": True, "server_name": sni, "insecure": insecure, "utls": {"enabled": True, "fingerprint": fp}}
+            if alpn: tls_cfg["alpn"] = alpn
+            outbound["tls"] = tls_cfg
+        if transport_obj: outbound["transport"] = transport_obj
+
+    elif scheme == "trojan":
+        outbound["password"] = auth
+        tls_cfg = {"enabled": True, "server_name": sni, "insecure": insecure, "utls": {"enabled": True, "fingerprint": fp}}
+        if alpn: tls_cfg["alpn"] = alpn
+        outbound["tls"] = tls_cfg
+        if transport_obj: outbound["transport"] = transport_obj
+
+    elif scheme in ("hysteria2", "hy2"):
+        outbound["password"] = auth
+        tls_cfg = {"enabled": True, "server_name": sni, "insecure": insecure, "alpn": alpn if alpn else ["h3"]}
+        outbound["tls"] = tls_cfg
+        obfs_type = query.get("obfs", [""])[0]
+        if obfs_type: outbound["obfs"] = {"type": obfs_type, "password": query.get("obfs-password", [""])[0]}
+
+    return outbound
+
+def main():
+    enabled = get_uci("enabled", "0")
+    if enabled != "1" and "--force" not in sys.argv:
+        print("Сервис отключен в настройках.")
+        return
+
+    subs = get_subscriptions()
+    active_subs = [s for s in subs if s.get("enabled", "1") == "1" and s.get("url")]
+
+    if not active_subs:
+        print("Ошибка: Нет активных подписок для парсинга.")
+        return
+
+    threshold = int(get_uci("ping_threshold", "350"))
+    max_jitter = int(get_uci("max_jitter", "150"))
+    filter_ru = get_uci("filter_ru", "1") == "1"
+    target_section = get_uci("target_section", "main")
+
+    start_time = time.time()
+    all_links = []
+    seen = set()
+
+    for s in active_subs:
+        links = fetch_single_sub(s)
+        for l in links:
+            parsed = urllib.parse.urlsplit(l)
+            key = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            if key not in seen:
+                seen.add(key)
+                all_links.append(l)
+
+    if not all_links:
+        print("Ошибка: Боевые узлы не найдены ни в одной подписке.")
+        return
+
+    print(f"\nВсего уникальных узлов для тестирования: {len(all_links)}")
+
+    api_port = find_free_port()
+    outbounds = []
+    tag_map = {}
+    for i, link in enumerate(all_links):
+        tag = f"n_{i+1}"
+        try:
+            ob = parse_link_to_singbox_outbound(link, tag)
+            outbounds.append(ob)
+            tag_map[tag] = link
+        except Exception:
+            continue
+
+    outbounds.append({"type": "direct", "tag": "direct"})
+    cfg = {
+        "log": {"level": "warn"},
+        "experimental": {"clash_api": {"external_controller": f"127.0.0.1:{api_port}"}},
+        "dns": {"servers": [{"tag": "remote-dns", "type": "udp", "server": "77.88.8.8", "server_port": 53}], "strategy": "prefer_ipv4"},
+        "outbounds": outbounds
+    }
+
+    tmp_cfg = f"/tmp/subparser_test_{api_port}.json"
+    with open(tmp_cfg, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+    proc = subprocess.Popen([SINGBOX_BIN, "run", "-c", tmp_cfg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    time.sleep(1.2)
+
+    if proc.poll() is not None:
+        _, err = proc.communicate()
+        print(f"\n[ОШИБКА] sing-box не запустился на порту {api_port}:\n{err}")
+        if os.path.exists(tmp_cfg): os.remove(tmp_cfg)
+        return
+
+    results = {}
+    total = len(tag_map)
+    try:
+        print(f"\n[Этап 1/2] Быстрый скрининг {total} узлов...")
+        stage1_candidates = []
+        def quick_probe(item):
+            tag, link = item
+            delays = []
+            for i in range(2):
+                d = query_node_delay(api_port, tag, timeout_ms=3000)
+                if d > 0: delays.append(d)
+                if i == 0: time.sleep(0.15)
+            return tag, link, delays
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = [executor.submit(quick_probe, item) for item in tag_map.items()]
+            for future in as_completed(futures):
+                tag, link, delays = future.result()
+                name = urllib.parse.unquote(urllib.parse.urlsplit(link).fragment) or tag
+                if delays:
+                    min_d = min(delays)
+                    if not (filter_ru and is_ru_node(name)):
+                        stage1_candidates.append((tag, link, min_d))
+                    results[link] = {"delay": min_d, "jitter": 0, "is_stable": False, "success_count": len(delays), "name": name}
+                    print(f"[ALIVE] {min_d:4d} ms | {name}")
+                else:
+                    print(f"[DEAD ]         | {name}")
+
+        print(f"\nОтобрано кандидатов для теста стабильности: {len(stage1_candidates)}")
+        if stage1_candidates:
+            print(f"\n[Этап 2/2] Анализ стабильности (5 замеров, медиана)...")
+            def detailed_probe(cand):
+                tag, link, _ = cand
+                delays = []
+                for i in range(5):
+                    d = query_node_delay(api_port, tag, timeout_ms=3000)
+                    if d > 0: delays.append(d)
+                    if i < 4: time.sleep(0.2)
+                name = urllib.parse.unquote(urllib.parse.urlsplit(link).fragment) or tag
+                succ = len(delays)
+                if succ < 4: return link, name, -1, -1, False, succ
+                delays.sort()
+                med = delays[succ // 2]
+                trimmed = delays[:-1]
+                eff_j = max(trimmed) - min(trimmed)
+                worst = delays[-1] - med
+                is_st = (eff_j <= max(max_jitter, int(med * 0.50)) and worst <= max(350, int(med * 2.0)))
+                return link, name, med, eff_j, is_st, succ
+
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                futures = [executor.submit(detailed_probe, cand) for cand in stage1_candidates]
+                for future in as_completed(futures):
+                    link, name, med_d, diff, is_stable, succ = future.result()
+                    if med_d > 0:
+                        results[link] = {"delay": med_d, "jitter": diff, "is_stable": is_stable, "success_count": succ, "name": name}
+                        label = f"[STABLE {succ}/5]" if is_stable else f"[UNSTABLE {succ}/5]"
+                        print(f"{label} {med_d:4d} ms (±{diff:3d}) | {name}")
+                    else:
+                        print(f"[DROPPED {succ}/5] | {name}")
+    finally:
+        proc.terminate()
+        try: proc.wait(1.5)
+        except Exception: proc.kill()
+        if os.path.exists(tmp_cfg): os.remove(tmp_cfg)
+
+    best = [l for l, i in results.items() if i["delay"] < threshold and i["is_stable"] and not (filter_ru and is_ru_node(i["name"]))]
+    best.sort(key=lambda l: results[l]["delay"])
+    if not best and results:
+        print("\n[!] Применяем fallback без RU.")
+        fallback = [l for l, i in results.items() if not (filter_ru and is_ru_node(i["name"]))]
+        fallback.sort(key=lambda l: results[l]["delay"])
+        best = fallback[:10]
+
+    elapsed = round(time.time() - start_time, 1)
+    MIN_REQUIRED_NODES = 2
+
+    if best and len(best) >= MIN_REQUIRED_NODES:
+        print(f"\nВыбрано лучших узлов: {len(best)} шт. (Время: {elapsed}с)")
+        subprocess.run(["uci", "-q", "delete", f"podkop.{target_section}.urltest_proxy_links"], check=False)
+        for link in best:
+            subprocess.run(["uci", "add_list", f"podkop.{target_section}.urltest_proxy_links={link}"], check=False)
+        subprocess.run(["uci", "commit", "podkop"], check=False)
+        subprocess.run(["/etc/init.d/podkop", "restart"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        print(f"Podkop успешно обновлен (секция '{target_section}')!")
+
+        proto_counts = {}
+        for l in best:
+            pr = urllib.parse.urlsplit(l).scheme.upper()
+            proto_counts[pr] = proto_counts.get(pr, 0) + 1
+        proto_str = " | ".join([f"{p}: {cnt}" for p, cnt in sorted(proto_counts.items())])
+
+        medals = ["🥇", "🥈", "🥉"]
+        top_lines = []
+        for i, l in enumerate(best[:3]):
+            info = results.get(l, {})
+            d = info.get("delay", 0)
+            jit = info.get("jitter", 0)
+            nm = info.get("name", "Proxy")
+            m = medals[i] if i < len(medals) else "•"
+            top_lines.append(f"{m} <code>{d} ms</code> (±{jit}) — {nm}")
+        top_text = "\n".join(top_lines)
+
+        msg = (
+            f"🟢 <b>SubParser: Podkop обновлен</b>\n\n"
+            f"📊 <b>Статистика:</b>\n"
+            f"• Отобрано узлов: <b>{len(best)}</b> из {len(all_links)}\n"
+            f"• Порог задержки: &lt; {threshold} ms\n"
+            f"• Время анализа: <code>{elapsed}с</code>\n\n"
+            f"⚡ <b>Топ-3 быстрых узла:</b>\n{top_text}\n\n"
+            f"🏷 <b>Протоколы:</b> <code>{proto_str}</code>"
+        )
+        if GLOBAL_SUB_USERINFO:
+            sub_lines = []
+            for sname, sdata in GLOBAL_SUB_USERINFO.items():
+                used = sdata.get("upload", 0) + sdata.get("download", 0)
+                tot = sdata.get("total", 0)
+                exp = sdata.get("expire", 0)
+                exp_str = time.strftime('%d.%m.%Y', time.localtime(exp)) if exp else "бессрочно"
+                if tot > 0:
+                    sub_lines.append(f"• <b>{sname}</b>: {format_bytes(used)} / {format_bytes(tot)} (до {exp_str})")
+            if sub_lines:
+                msg += "\n\n💳 <b>Лимиты подписок:</b>\n" + "\n".join(sub_lines)
+        send_telegram_notify(msg)
+    else:
+        count = len(best) if best else 0
+        print(f"\n[!] Предупреждение: найдено всего {count} узлов (требуется минимум {MIN_REQUIRED_NODES}).")
+        print("[!] Текущий список серверов Podkop сохранен без изменений (защита от сетевого сбоя).")
+        print(f"Podkop успешно сохранен в резервном состоянии. (Время: {elapsed}с)")
+        msg = f"🔴 <b>SubParser Alert</b>!\n" \
+              f"Найдено всего {count} узлов. Конфигурация Podkop не изменена."
+        send_telegram_notify(msg)
+
+if __name__ == "__main__":
+    main()

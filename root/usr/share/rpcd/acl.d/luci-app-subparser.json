@@ -1,0 +1,19 @@
+{
+    "luci-app-subparser": {
+        "description": "Grant access to SubParser and Helper",
+        "read": {
+            "file": {
+                "/usr/bin/subparser.py": [ "exec" ],
+                "/usr/bin/subparser-helper.sh": [ "exec" ],
+                "/tmp/subparser_selected.txt": [ "read" ]
+            },
+            "uci": [ "subparser", "podkop" ]
+        },
+        "write": {
+            "file": {
+                "/tmp/subparser_selected.txt": [ "write" ]
+            },
+            "uci": [ "subparser", "podkop" ]
+        }
+    }
+}

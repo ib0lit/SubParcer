@@ -1,0 +1,53 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+
+CRON_FILE="/etc/crontabs/root"
+HELPER="/usr/bin/subparser-helper.sh"
+
+update_cron() {
+    local enabled interval cron_expr
+
+    enabled=$(uci -q get subparser.settings.enabled || echo "0")
+    interval=$(uci -q get subparser.settings.interval || echo "1h")
+
+    touch "$CRON_FILE"
+    sed -i '\#/usr/bin/subparser#d' "$CRON_FILE"
+
+    if [ "$enabled" = "1" ]; then
+        case "$interval" in
+            "30m") cron_expr="*/30 * * * *" ;;
+            "1h")  cron_expr="0 * * * *" ;;
+            "2h")  cron_expr="0 */2 * * *" ;;
+            "3h")  cron_expr="0 */3 * * *" ;;
+            "4h")  cron_expr="0 */4 * * *" ;;
+            "6h")  cron_expr="0 */6 * * *" ;;
+            "8h")  cron_expr="0 */8 * * *" ;;
+            "12h") cron_expr="0 */12 * * *" ;;
+            "24h"|"1d") cron_expr="0 4 * * *" ;;
+            *)     cron_expr="0 * * * *" ;;
+        esac
+
+        echo "$cron_expr $HELPER bg_sync >/dev/null 2>&1" >> "$CRON_FILE"
+    fi
+
+    /etc/init.d/cron restart >/dev/null 2>&1
+}
+
+start() {
+    update_cron
+}
+
+stop() {
+    touch "$CRON_FILE"
+    sed -i '\#/usr/bin/subparser#d' "$CRON_FILE"
+    /etc/init.d/cron restart >/dev/null 2>&1
+}
+
+restart() {
+    update_cron
+}
+
+reload() {
+    update_cron
+}
