@@ -537,7 +537,7 @@ def get_log_screen():
     return text, kb
 
 def get_reboot_confirm_screen():
-    text = "⚠️️ <b>Подтверждение перезагрузки роутера</b>\n\nВы действительно хотите перезагрузить устройство?"
+    text = "⚠ <b>Подтверждение перезагрузки роутера</b>\n\nВы действительно хотите перезагрузить устройство?"
     kb = {
         "inline_keyboard": [
             [{"text": "✅ Да, перезагрузить!", "callback_data": "do_reboot"}],
@@ -692,12 +692,11 @@ def batch_ping_nodes(links):
                     {"tag": "dns-direct", "type": "udp", "server": "77.88.8.8", "server_port": 53, "detour": "direct"},
                     {"tag": "dns-cf", "type": "udp", "server": "1.1.1.1", "server_port": 53, "detour": "direct"}
                 ],
-                "rules": [{"outbound": "any", "server": "dns-direct"}],
                 "strategy": "prefer_ipv4"
             },
             "route": {
                 "auto_detect_interface": True,
-                "rules": [{"protocol": "dns", "outbound": "direct"}]
+                "default_domain_resolver": "dns-direct"
             },
             "outbounds": outbounds
         }
@@ -908,13 +907,9 @@ def main():
                         subprocess.Popen(["/sbin/reboot"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
                     elif data == "restart":
-                        answer_callback(token, cb_id, "Служба перезапускается...")
-                        text_pending = "♻️ <b>Служба Podkop перезапускается...</b>\nСоединение восстановится через 3-5 секунд."
-                        kb_pending = {"inline_keyboard": [
-                            [{"text": "🔄 Проверить статус", "callback_data": "status"}],
-                            [{"text": "◀️ В главное меню", "callback_data": "home"}]
-                        ]}
-                        edit_msg(token, chat_id, msg_id, text_pending, kb_pending)
+                        answer_callback(token, cb_id)
+                        t, kb = get_podkop_service_status()
+                        edit_msg(token, chat_id, msg_id, "♻️ <b>Служба Podkop перезапускается...</b>\nСоединение восстановится через 3-5 секунд.")
                         subprocess.Popen(["/etc/init.d/podkop", "restart"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
                     elif data == "sync":
@@ -960,7 +955,7 @@ def main():
                         card = f"🌐 <b>Сервер #{idx+1}</b>\n\n• <b>Имя:</b> <code>{name}</code>\n• <b>Протокол:</b> <code>{proto}</code>\n\nНажмите кнопку для удаления сервера из пула:"
                         kb = {"inline_keyboard": [
                             [{"text": "🗑 Удалить из Podkop", "callback_data": f"del:{idx}"}],
-                            [{"text": "◀️ Назад к списку", "callback_data": "servers"}]
+                            [{"text": "◀️️ Назад к списку", "callback_data": "servers"}]
                         ]}
                         answer_callback(token, cb_id)
                         edit_msg(token, chat_id, msg_id, card, kb)

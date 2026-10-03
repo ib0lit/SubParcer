@@ -375,22 +375,11 @@ def main():
                     "detour": "direct"
                 }
             ],
-            "rules": [
-                {
-                    "outbound": "any",
-                    "server": "dns-direct"
-                }
-            ],
             "strategy": "prefer_ipv4"
         },
         "route": {
             "auto_detect_interface": True,
-            "rules": [
-                {
-                    "protocol": "dns",
-                    "outbound": "direct"
-                }
-            ]
+            "default_domain_resolver": "dns-direct"
         },
         "outbounds": outbounds
     }
