@@ -15,16 +15,24 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 CONFIG_NAME = "subparser"
 SINGBOX_BIN = "/usr/bin/sing-box"
-TEST_URL = "https://cp.cloudflare.com/generate_204"
+TEST_URL = "https://www.gstatic.com/generate_204"
 MAX_WORKERS = 12
 HWID_PHONE = "f4c9b1a0d8e27365"
 
 UA_MAP = {
     "v2rayN": "v2rayN/6.23",
     "ClashMeta": "ClashMeta/1.18.0",
+    "clashmeta": "ClashMeta/1.18.0",
     "SingBox": "sing-box/1.9.0",
+    "singbox": "sing-box/1.9.0",
     "Shadowrocket": "Shadowrocket/2.2.0",
-    "NekoBox": "NekoBox/1.3.1"
+    "shadowrocket": "Shadowrocket/2.2.0",
+    "NekoBox": "NekoBox/1.3.1",
+    "flclash": "ClashMeta/1.18.0",
+    "clash": "ClashforWindows/0.20.39",
+    "incy": "Incy/1.0.0 (Android)",
+    "happ": "Happ/1.0.0 (iOS)",
+    "curl": "curl/7.88.1"
 }
 
 def send_telegram_notify(text):
@@ -238,6 +246,7 @@ def parse_link_to_singbox_outbound(link: str, tag: str) -> dict:
         "tag": tag,
         "server": server,
         "server_port": port,
+        "routing_mark": 255
     }
 
     sni = query.get("sni", [query.get("peer", [server])[0]])[0] or server
@@ -341,11 +350,48 @@ def main():
         except Exception:
             continue
 
-    outbounds.append({"type": "direct", "tag": "direct"})
+    outbounds.append({"type": "direct", "tag": "direct", "routing_mark": 255})
     cfg = {
         "log": {"level": "warn"},
-        "experimental": {"clash_api": {"external_controller": f"127.0.0.1:{api_port}"}},
-        "dns": {"servers": [{"tag": "remote-dns", "type": "udp", "server": "77.88.8.8", "server_port": 53}], "strategy": "prefer_ipv4"},
+        "experimental": {
+            "clash_api": {
+                "external_controller": f"127.0.0.1:{api_port}"
+            }
+        },
+        "dns": {
+            "servers": [
+                {
+                    "tag": "dns-direct",
+                    "type": "udp",
+                    "server": "77.88.8.8",
+                    "server_port": 53,
+                    "detour": "direct"
+                },
+                {
+                    "tag": "dns-cf",
+                    "type": "udp",
+                    "server": "1.1.1.1",
+                    "server_port": 53,
+                    "detour": "direct"
+                }
+            ],
+            "rules": [
+                {
+                    "outbound": "any",
+                    "server": "dns-direct"
+                }
+            ],
+            "strategy": "prefer_ipv4"
+        },
+        "route": {
+            "auto_detect_interface": True,
+            "rules": [
+                {
+                    "protocol": "dns",
+                    "outbound": "direct"
+                }
+            ]
+        },
         "outbounds": outbounds
     }
 
@@ -354,7 +400,7 @@ def main():
         json.dump(cfg, f, indent=2)
 
     proc = subprocess.Popen([SINGBOX_BIN, "run", "-c", tmp_cfg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    time.sleep(1.2)
+    time.sleep(2.5)
 
     if proc.poll() is not None:
         _, err = proc.communicate()

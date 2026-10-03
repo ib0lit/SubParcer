@@ -16,6 +16,7 @@ LOCK_FILE = "/var/run/subparser.lock"
 SINGBOX_BIN = "/usr/bin/sing-box"
 LOG_FILE = "/tmp/subparser_sync.log"
 BLOCKED_FILE = "/tmp/bot_blocked_macs.json"
+TEST_URL_GLOBAL = "https://www.gstatic.com/generate_204"
 
 SSL_CTX = ssl.create_default_context()
 SSL_CTX.check_hostname = False
@@ -536,7 +537,7 @@ def get_log_screen():
     return text, kb
 
 def get_reboot_confirm_screen():
-    text = "⚠️ <b>Подтверждение перезагрузки роутера</b>\n\nВы действительно хотите перезагрузить устройство?"
+    text = "⚠️️ <b>Подтверждение перезагрузки роутера</b>\n\nВы действительно хотите перезагрузить устройство?"
     kb = {
         "inline_keyboard": [
             [{"text": "✅ Да, перезагрузить!", "callback_data": "do_reboot"}],
@@ -647,7 +648,7 @@ def find_free_port():
 
 def batch_ping_nodes(links):
     results = {}
-    test_url = urllib.parse.quote("https://cp.cloudflare.com/generate_204", safe="")
+    test_url = urllib.parse.quote(TEST_URL_GLOBAL, safe="")
     try:
         req = urllib.request.Request("http://192.168.1.1:9090/proxies")
         with urllib.request.urlopen(req, timeout=3, context=SSL_CTX) as r:
@@ -682,24 +683,35 @@ def batch_ping_nodes(links):
                 outbounds.append(ob)
                 tag_map[t] = i
             except Exception: pass
-        outbounds.append({"type": "direct", "tag": "direct"})
+        outbounds.append({"type": "direct", "tag": "direct", "routing_mark": 255})
         cfg = {
             "log": {"level": "warn"},
             "experimental": {"clash_api": {"external_controller": f"127.0.0.1:{api_port}"}},
-            "dns": {"servers": [{"tag": "remote-dns", "type": "udp", "server": "77.88.8.8", "server_port": 53}], "strategy": "prefer_ipv4"},
+            "dns": {
+                "servers": [
+                    {"tag": "dns-direct", "type": "udp", "server": "77.88.8.8", "server_port": 53, "detour": "direct"},
+                    {"tag": "dns-cf", "type": "udp", "server": "1.1.1.1", "server_port": 53, "detour": "direct"}
+                ],
+                "rules": [{"outbound": "any", "server": "dns-direct"}],
+                "strategy": "prefer_ipv4"
+            },
+            "route": {
+                "auto_detect_interface": True,
+                "rules": [{"protocol": "dns", "outbound": "direct"}]
+            },
             "outbounds": outbounds
         }
         tmp_cfg = f"/tmp/sb_tg_test_{api_port}.json"
         with open(tmp_cfg, "w") as f: json.dump(cfg, f)
         proc = subprocess.Popen([SINGBOX_BIN, "run", "-c", tmp_cfg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(1.2)
+        time.sleep(2.5)
         try:
             for t, idx in tag_map.items():
                 d = subparser.query_node_delay(api_port, t, timeout_ms=3000)
                 if d > 0: results[idx] = d
         finally:
             proc.terminate()
-            try: proc.wait(1.0)
+            try: proc.wait(1.5)
             except Exception: proc.kill()
             if os.path.exists(tmp_cfg): os.remove(tmp_cfg)
 
@@ -711,7 +723,7 @@ def get_main_screen():
         [{"text": "📋 Серверы и пинг", "callback_data": "servers"}, {"text": "🔄 Запустить парсер", "callback_data": "sync"}],
         [{"text": "📟 Ресурсы роутера", "callback_data": "sysinfo"}, {"text": "👥 Клиенты сети", "callback_data": "clients"}],
         [{"text": "🛡 Доступ к сервисам", "callback_data": "check_services"}, {"text": "⚙️ Параметры парсера", "callback_data": "settings"}],
-        [{"text": "📊 Статус", "callback_data": "status"}, {"text": "♻️️ Рестарт Podkop", "callback_data": "restart"}],
+        [{"text": "📊 Статус", "callback_data": "status"}, {"text": "♻ Рестарт Podkop", "callback_data": "restart"}],
         [{"text": "⚠️ Reboot роутера", "callback_data": "reboot"}]
     ]}
     return text, kb
