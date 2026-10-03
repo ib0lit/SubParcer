@@ -20,7 +20,7 @@
 
 Подключитесь к маршрутизатору по SSH и выполните команду первичной установки:
 
-sh \-c "$(curl-sSL"https://raw.githubusercontent.com/ib0lit/SubParcer/main/install.sh?nocache=$(date \+%s)")"
+```sh \-c "$(curl-sSL"https://raw.githubusercontent.com/ib0lit/SubParcer/main/install.sh?nocache=$(date \+%s)")"```
 
 Команда автоматически:
 
@@ -33,7 +33,7 @@ sh \-c "$(curl-sSL"https://raw.githubusercontent.com/ib0lit/SubParcer/main/insta
 
 Для обновления сервиса на маршрутизаторе без риска сброса текущих ссылок, токенов бота и настроек выполните:
 
-sh \-c "$(curl-sSL"https://raw.githubusercontent.com/ib0lit/SubParcer/main/update.sh?nocache=$(date \+%s)")"
+```sh \-c "$(curl-sSL"https://raw.githubusercontent.com/ib0lit/SubParcer/main/update.sh?nocache=$(date \+%s)")"```
 
 Скрипт проверяет SHA последнего коммита через GitHub API. Если на маршрутизаторе уже установлена актуальная версия, скрипт завершит работу без перезаписи файлов и перезапуска демонов.
 
@@ -42,7 +42,7 @@ sh \-c "$(curl-sSL"https://raw.githubusercontent.com/ib0lit/SubParcer/main/updat
 1. Перейдите в веб\-интерфейс маршрутизатора по адресу http\://192.168.1.1.  
 2. Откройте раздел **«Службы»** → **SubParser**.  
 3. На вкладке настроек укажите:  
-   * **Ссылки на подписки**: список рабочих URL (каждая ссылка с новой строки).  
+   * **Ссылки на подписки**: список рабочих URL.  
    * **Порог пинга / Jitter**: параметры отбора серверов.  
    * **Telegram Bot Token / Chat ID** (опционально): данные созданного бота для управления через мессенджер.  
 4. Нажмите **Сохранить и применить**.
