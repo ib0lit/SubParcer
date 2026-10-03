@@ -5,17 +5,19 @@ REPO_USER="ib0lit"
 REPO_NAME="SubParcer"
 BRANCH="main"
 
-echo "=== [1/6] Установка системных зависимостей ==="
+echo "=== [1/6] Определение пакетного менеджера и установка зависимостей ==="
 if command -v apk >/dev/null 2>&1; then
-    echo "Используется пакетный менеджер apk..."
+    echo "[*] Обнаружен менеджер apk (OpenWrt 24+ / 25+)"
     apk update
-    apk add python3 python3-urllib python3-ssl conntrack-tools curl
+    # В apk: conntrack называется conntrack, а ssl встроен в модуль python3/urllib
+    apk add python3 python3-urllib conntrack curl
 elif command -v opkg >/dev/null 2>&1; then
-    echo "Используется пакетный менеджер opkg..."
+    echo "[*] Обнаружен менеджер opkg (OpenWrt 21, 22, 23)"
     opkg update
+    # В opkg: python3-ssl вынесен в отдельный пакет
     opkg install python3 python3-urllib python3-ssl conntrack curl
 else
-    echo "Пакетный менеджер не обнаружен, пропускаем установку зависимостей."
+    echo "[!] Предупреждение: ни apk, ни opkg не найдены. Убедитесь, что зависимости установлены вручную."
 fi
 
 echo "=== [2/6] Загрузка компонентов из GitHub ==="
