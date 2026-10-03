@@ -7,6 +7,9 @@ BRANCH="main"
 VERSION_FILE="/etc/subparser_version"
 
 echo "=== [1/6] Определение пакетного менеджера и зависимостей ==="
+# Временно отключаем строгий выход по ошибке на этапе пакетов
+set +e
+
 if command -v apk >/dev/null 2>&1; then
     echo "[*] Обнаружен менеджер apk (OpenWrt 25+)"
     apk update
@@ -14,23 +17,14 @@ if command -v apk >/dev/null 2>&1; then
 elif command -v opkg >/dev/null 2>&1; then
     echo "[*] Обнаружен менеджер opkg (OpenWrt 21-24)"
     opkg update
-    # Базовые системные зависимости
+    # Ставим только гарантированно существующие пакеты OpenWrt 21-24
     opkg install python3 python3-urllib conntrack curl ca-bundle ca-certificates
-    # Пакет python3-ssl опционален: в OpenWrt 24+ ssl уже включен в базовый python3
-    opkg install python3-ssl 2>/dev/null || true
 else
     echo "[!] Предупреждение: пакетный менеджер не найден. Пропуск шага."
 fi
 
-# Проверка готовности модуля SSL в Python3
-if ! python3 -c "import ssl" >/dev/null 2>&1; then
-    echo "[!] Модуль ssl не найден. Пробуем установить openssl/cryptography..."
-    if command -v apk >/dev/null 2>&1; then
-        apk add python3-cryptography 2>/dev/null || true
-    else
-        opkg install python3-cryptography 2>/dev/null || opkg install python3-openssl 2>/dev/null || true
-    fi
-fi
+# Возвращаем строгий режим после проверки пакетов
+set -e
 
 echo "=== [2/6] Загрузка компонентов с GitHub ==="
 TMP_DIR="/tmp/subparser-install"
@@ -41,7 +35,6 @@ curl -sL "https://github.com/${REPO_USER}/${REPO_NAME}/archive/refs/heads/${BRAN
 SRC_PATH="${TMP_DIR}/${REPO_NAME}-${BRANCH}/root"
 
 echo "=== [3/6] Развертывание системных файлов ==="
-# Сохраняем пользовательские настройки, если файл уже существует
 if [ ! -f /etc/config/subparser ]; then
     mkdir -p /etc/config
     cp -f "${SRC_PATH}/etc/config/subparser" /etc/config/subparser
@@ -61,12 +54,10 @@ echo "=== [4/6] Настройка прав доступа ==="
 chmod +x /usr/bin/subparser* 2>/dev/null || true
 
 echo "=== [5/6] Регистрация задач и фиксация версии ==="
-# Добавление watchdog в планировщик, если его еще нет
 if ! crontab -l 2>/dev/null | grep -q "subparser-watchdog.sh"; then
     (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/bin/subparser-watchdog.sh >/dev/null 2>&1") | crontab -
 fi
 
-# Сохранение хэша установленной версии для update.sh
 REMOTE_SHA=$(curl -sL \
   -H "User-Agent: OpenWrt-SubParser-Installer" \
   "https://api.github.com/repos/${REPO_USER}/${REPO_NAME}/commits/${BRANCH}" \
