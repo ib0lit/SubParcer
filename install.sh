@@ -7,15 +7,15 @@ BRANCH="main"
 
 echo "=== [1/6] Установка системных зависимостей ==="
 if command -v apk >/dev/null 2>&1; then
-    echo "Обнаружен менеджер пакетов apk (OpenWrt 24+)..."
+    echo "Используется пакетный менеджер apk..."
     apk update
     apk add python3 python3-urllib python3-ssl conntrack-tools curl
 elif command -v opkg >/dev/null 2>&1; then
-    echo "Обнаружен менеджер пакетов opkg..."
+    echo "Используется пакетный менеджер opkg..."
     opkg update
     opkg install python3 python3-urllib python3-ssl conntrack curl
 else
-    echo "Внимание: пакетный менеджер не найден, пропускаем установку зависимостей."
+    echo "Пакетный менеджер не обнаружен, пропускаем установку зависимостей."
 fi
 
 echo "=== [2/6] Загрузка компонентов из GitHub ==="
