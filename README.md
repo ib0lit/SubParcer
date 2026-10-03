@@ -21,7 +21,7 @@
 Подключитесь к маршрутизатору по SSH и выполните команду первичной установки:
 
 ```bash
-sh -c "$(curl -sSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/ib0lit/SubParcer/main/install.sh)"
+sh -c "$(curl -sSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/ib0lit/SubParser/main/install.sh)"
 ```
 
 Команда автоматически:
@@ -36,7 +36,7 @@ sh -c "$(curl -sSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.co
 Для обновления сервиса на маршрутизаторе выполните:
 
 ```bash
-sh -c "$(curl -sSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/ib0lit/SubParcer/main/update.sh)"
+sh -c "$(curl -sSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/ib0lit/SubParser/main/update.sh)"
 ```
 
 Скрипт проверяет SHA последнего коммита через GitHub API. Если на маршрутизаторе уже установлена актуальная версия, скрипт завершит работу без перезаписи файлов и перезапуска демонов.
@@ -56,7 +56,7 @@ sh -c "$(curl -sSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.co
 Для удаления сервиса на маршрутизаторе выполните:
 
 ```bash
-sh -c "$(curl -sSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/ib0lit/SubParcer/main/uninstall.sh)"
+sh -c "$(curl -sSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/ib0lit/SubParser/main/uninstall.sh)"
 ```
 
 Скрипт автоматически:

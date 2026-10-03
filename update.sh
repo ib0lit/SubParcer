@@ -2,7 +2,7 @@
 set -e
 
 REPO_USER="ib0lit"
-REPO_NAME="SubParcer"
+REPO_NAME="SubParser"
 BRANCH="main"
 VERSION_FILE="/etc/subparser_version"
 
