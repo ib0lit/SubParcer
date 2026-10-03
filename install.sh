@@ -6,8 +6,17 @@ REPO_NAME="SubParcer"
 BRANCH="main"
 
 echo "=== [1/6] Установка системных зависимостей ==="
-opkg update
-opkg install python3 python3-urllib python3-ssl conntrack curl
+if command -v apk >/dev/null 2>&1; then
+    echo "Обнаружен менеджер пакетов apk (OpenWrt 24+)..."
+    apk update
+    apk add python3 python3-urllib python3-ssl conntrack-tools curl
+elif command -v opkg >/dev/null 2>&1; then
+    echo "Обнаружен менеджер пакетов opkg..."
+    opkg update
+    opkg install python3 python3-urllib python3-ssl conntrack curl
+else
+    echo "Внимание: пакетный менеджер не найден, пропускаем установку зависимостей."
+fi
 
 echo "=== [2/6] Загрузка компонентов из GitHub ==="
 TMP_DIR="/tmp/subparser-install"
