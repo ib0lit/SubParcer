@@ -20,7 +20,9 @@
 
 Подключитесь к маршрутизатору по SSH и выполните команду первичной установки:
 
-```sh -c "$(curl -sSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/ib0lit/SubParcer/main/install.sh)"```
+```bash
+sh -c "$(curl -sSL -H 'Cache-Control: no-cache' [https://raw.githubusercontent.com/ib0lit/SubParcer/main/install.sh](https://raw.githubusercontent.com/ib0lit/SubParcer/main/install.sh))"
+```
 
 Команда автоматически:
 
@@ -33,7 +35,9 @@
 
 Для обновления сервиса на маршрутизаторе выполните:
 
-```sh -c "$(curl -sSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/ib0lit/SubParcer/main/update.sh)"```
+```bash
+sh -c "$(curl -sSL -H 'Cache-Control: no-cache' [https://raw.githubusercontent.com/ib0lit/SubParcer/main/update.sh](https://raw.githubusercontent.com/ib0lit/SubParcer/main/update.sh))"
+```
 
 Скрипт проверяет SHA последнего коммита через GitHub API. Если на маршрутизаторе уже установлена актуальная версия, скрипт завершит работу без перезаписи файлов и перезапуска демонов.
 
