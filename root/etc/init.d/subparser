@@ -1,53 +1,83 @@
 #!/bin/sh /etc/rc.common
 
-START=99
+START=95
+STOP=10
 
-CRON_FILE="/etc/crontabs/root"
-HELPER="/usr/bin/subparser-helper.sh"
+CRON_TMP="/tmp/cron_subparser.tmp"
 
-update_cron() {
-    local enabled interval cron_expr
+get_cron_schedule() {
+    local interval="$1"
+    local ch="$2"
+    local cm="$3"
 
-    enabled=$(uci -q get subparser.settings.enabled || echo "0")
-    interval=$(uci -q get subparser.settings.interval || echo "1h")
+    [ -z "$ch" ] && ch="0"
+    [ -z "$cm" ] && cm="0"
 
-    touch "$CRON_FILE"
-    sed -i '\#/usr/bin/subparser#d' "$CRON_FILE"
+    # Срезаем лидирующие нули для безопасного сравнения в Busybox sh
+    ch="${ch#0}"; [ -z "$ch" ] && ch="0"
+    cm="${cm#0}"; [ -z "$cm" ] && cm="0"
 
-    if [ "$enabled" = "1" ]; then
-        case "$interval" in
-            "30m") cron_expr="*/30 * * * *" ;;
-            "1h")  cron_expr="0 * * * *" ;;
-            "2h")  cron_expr="0 */2 * * *" ;;
-            "3h")  cron_expr="0 */3 * * *" ;;
-            "4h")  cron_expr="0 */4 * * *" ;;
-            "6h")  cron_expr="0 */6 * * *" ;;
-            "8h")  cron_expr="0 */8 * * *" ;;
-            "12h") cron_expr="0 */12 * * *" ;;
-            "24h"|"1d") cron_expr="0 4 * * *" ;;
-            *)     cron_expr="0 * * * *" ;;
-        esac
-
-        echo "$cron_expr $HELPER bg_sync >/dev/null 2>&1" >> "$CRON_FILE"
-    fi
-
-    /etc/init.d/cron restart >/dev/null 2>&1
+    case "$interval" in
+        never|"")
+            echo ""
+            ;;
+        1h)
+            echo "0 * * * *"
+            ;;
+        12h)
+            echo "0 */12 * * *"
+            ;;
+        24h)
+            echo "0 0 * * *"
+            ;;
+        custom_daily)
+            echo "${cm} ${ch} * * *"
+            ;;
+        custom_every_h)
+            [ "$ch" -lt 1 ] && ch="1"
+            echo "${cm} */${ch} * * *"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
 }
 
 start() {
-    update_cron
+    local enabled
+    local interval
+    local custom_hour
+    local custom_minute
+
+    config_load subparser
+    config_get enabled settings enabled '0'
+    config_get interval settings interval 'never'
+    config_get custom_hour settings custom_hour '0'
+    config_get custom_minute settings custom_minute '0'
+
+    crontab -l 2>/dev/null | grep -v "subparser.py" | grep -v "subparser-helper.sh bg_sync" > "$CRON_TMP" || true
+
+    if [ "$enabled" = "1" ] && [ "$interval" != "never" ]; then
+        local sched
+        sched=$(get_cron_schedule "$interval" "$custom_hour" "$custom_minute")
+        if [ -n "$sched" ]; then
+            echo "$sched /usr/bin/python3 /usr/bin/subparser.py >/dev/null 2>&1" >> "$CRON_TMP"
+        fi
+    fi
+
+    crontab "$CRON_TMP" 2>/dev/null || true
+    rm -f "$CRON_TMP"
+    /etc/init.d/cron restart >/dev/null 2>&1 || true
 }
 
 stop() {
-    touch "$CRON_FILE"
-    sed -i '\#/usr/bin/subparser#d' "$CRON_FILE"
-    /etc/init.d/cron restart >/dev/null 2>&1
+    crontab -l 2>/dev/null | grep -v "subparser.py" | grep -v "subparser-helper.sh bg_sync" > "$CRON_TMP" || true
+    crontab "$CRON_TMP" 2>/dev/null || true
+    rm -f "$CRON_TMP"
+    /etc/init.d/cron restart >/dev/null 2>&1 || true
 }
 
 restart() {
-    update_cron
-}
-
-reload() {
-    update_cron
+    stop
+    start
 }

@@ -1,6 +1,8 @@
 #!/bin/sh
 ACTION="$1"
-SECTION="main"
+SECTION="$2"
+[ -z "$SECTION" ] && SECTION="main"
+
 LAN_IP=$(uci -q get network.lan.ipaddr | cut -d'/' -f1)
 [ -z "$LAN_IP" ] && LAN_IP="192.168.1.1"
 API_HOST="${LAN_IP}:9090"
@@ -10,6 +12,25 @@ LOG_FILE="/tmp/subparser_sync.log"
 LOCK_FILE="/var/run/subparser.lock"
 
 case "$ACTION" in
+    get_podkop_sections)
+        # Совместимо со всеми версиями OpenWrt (парсинг UCI-конфига podkop)
+        SECTIONS=$(uci -q show podkop 2>/dev/null | grep "=podkop" | cut -d'.' -f2 | cut -d'=' -f1)
+        if [ -z "$SECTIONS" ]; then
+            SECTIONS=$(uci -q show podkop 2>/dev/null | grep "urltest_proxy_links" | cut -d'.' -f2 | sort -u)
+        fi
+        [ -z "$SECTIONS" ] && SECTIONS="main"
+
+        echo "["
+        FIRST=1
+        for s in $SECTIONS; do
+            [ $FIRST -eq 0 ] && echo ","
+            FIRST=0
+            printf '  "%s"' "$s"
+        done
+        echo ""
+        echo "]"
+        ;;
+
     test_tg)
         TOKEN=$(uci -q get subparser.settings.tg_bot_token)
         CHAT_ID=$(uci -q get subparser.settings.tg_chat_id)
@@ -29,6 +50,7 @@ case "$ACTION" in
             echo "{\"status\": \"error\", \"message\": \"$ERR\"}"
         fi
         ;;
+
     bg_sync)
         if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
             echo '{"status": "running"}'
@@ -105,7 +127,7 @@ case "$ACTION" in
 
     ping_group)
         URL="https://www.gstatic.com/generate_204"
-        RES=$(curl -s -m 5 "http://${API_HOST}/group/main-urltest-out/delay?url=${URL}&timeout=3000" 2>/dev/null)
+        RES=$(curl -s -m 5 "http://${API_HOST}/group/${SECTION}-urltest-out/delay?url=${URL}&timeout=3000" 2>/dev/null)
         [ -n "$RES" ] && echo "$RES" || echo '{}'
         ;;
 

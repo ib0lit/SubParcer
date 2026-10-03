@@ -72,6 +72,14 @@ def get_uci(option, default=""):
     except Exception:
         return default
 
+def get_target_sections() -> list:
+    try:
+        out = subprocess.check_output(["uci", "-q", "get", f"{CONFIG_NAME}.settings.target_section"], text=True).strip()
+        sections = [s.strip() for s in out.split() if s.strip()]
+        return sections if sections else ["main"]
+    except Exception:
+        return ["main"]
+
 def get_subscriptions():
     try:
         raw = subprocess.check_output(["uci", "-q", "export", CONFIG_NAME], text=True)
@@ -301,6 +309,10 @@ def parse_link_to_singbox_outbound(link: str, tag: str) -> dict:
 
     return outbound
 
+def link_fingerprint(link: str) -> str:
+    p = urllib.parse.urlsplit(link)
+    return f"{p.scheme}://{p.netloc}{p.path}?{p.query}"
+
 def main():
     enabled = get_uci("enabled", "0")
     if enabled != "1" and "--force" not in sys.argv:
@@ -315,9 +327,39 @@ def main():
         return
 
     threshold = int(get_uci("ping_threshold", "350"))
+    max_best = int(get_uci("max_best_nodes", "0"))
     max_jitter = int(get_uci("max_jitter", "150"))
     filter_ru = get_uci("filter_ru", "1") == "1"
-    target_section = get_uci("target_section", "main")
+    per_section_config = get_uci("per_section_config", "0") == "1"
+    
+    # Словарь секций вида: { 'main': 'replace', 'test': 'append' }
+    section_targets = {}
+    if per_section_config:
+        # Считываем доступные секции podkop
+        try:
+            raw_secs = subprocess.check_output(["uci", "-q", "show", "podkop"], text=True)
+            detected = set()
+            for line in raw_secs.splitlines():
+                if "=podkop" in line:
+                    detected.add(line.split(".")[1].split("=")[0])
+                elif "urltest_proxy_links" in line:
+                    detected.add(line.split(".")[1])
+            if not detected: detected = {"main"}
+        except Exception:
+            detected = {"main"}
+
+        for s in detected:
+            s_en = get_uci(f"sec_en_{s}", "1") == "1"
+            s_mode = get_uci(f"sec_mode_{s}", "replace")
+            if s_en:
+                section_targets[s] = s_mode
+    else:
+        g_mode = get_uci("update_mode", "replace")
+        for s in get_target_sections():
+            section_targets[s] = g_mode
+
+    if not section_targets:
+        section_targets["main"] = "replace" 
 
     start_time = time.time()
     all_links = []
@@ -326,10 +368,9 @@ def main():
     for s in active_subs:
         links = fetch_single_sub(s)
         for l in links:
-            parsed = urllib.parse.urlsplit(l)
-            key = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-            if key not in seen:
-                seen.add(key)
+            fp = link_fingerprint(l)
+            if fp not in seen:
+                seen.add(fp)
                 all_links.append(l)
 
     if not all_links:
@@ -470,17 +511,53 @@ def main():
         fallback.sort(key=lambda l: results[l]["delay"])
         best = fallback[:10]
 
+    if max_best > 0 and len(best) > max_best:
+        print(f"Применен лимит узлов: оставляем Топ-{max_best} из {len(best)}")
+        best = best[:max_best]
+
     elapsed = round(time.time() - start_time, 1)
     MIN_REQUIRED_NODES = 2
 
     if best and len(best) >= MIN_REQUIRED_NODES:
         print(f"\nВыбрано лучших узлов: {len(best)} шт. (Время: {elapsed}с)")
-        subprocess.run(["uci", "-q", "delete", f"podkop.{target_section}.urltest_proxy_links"], check=False)
-        for link in best:
-            subprocess.run(["uci", "add_list", f"podkop.{target_section}.urltest_proxy_links={link}"], check=False)
+
+        section_reports = []
+        for sec, mode in section_targets.items():
+            existing_links = []
+            try:
+                out = subprocess.check_output(["uci", "-q", "get", f"podkop.{sec}.urltest_proxy_links"], text=True).strip()
+                existing_links = [l.strip() for l in out.split() if l.strip()]
+            except Exception:
+                existing_links = []
+
+            before_cnt = len(existing_links)
+
+            if mode == "append":
+                existing_fps = {link_fingerprint(x) for x in existing_links}
+                merged = list(existing_links)
+                added = 0
+                for b in best:
+                    if link_fingerprint(b) not in existing_fps:
+                        merged.append(b)
+                        existing_fps.add(link_fingerprint(b))
+                        added += 1
+                target_links = merged
+                after_cnt = len(target_links)
+                print(f"Секция '{sec}': режим добавления (+{added} новых, было {before_cnt} -> стало {after_cnt})")
+                section_reports.append(f"  ▫️ <b>{sec}</b>: добавлено +{added} новых (было {before_cnt} → стало {after_cnt})")
+            else:
+                target_links = best
+                after_cnt = len(target_links)
+                print(f"Секция '{sec}': полная замена (было {before_cnt} -> стало {after_cnt})")
+                section_reports.append(f"  ▫️ <b>{sec}</b>: полная замена (было {before_cnt} → стало {after_cnt})")
+
+            subprocess.run(["uci", "-q", "delete", f"podkop.{sec}.urltest_proxy_links"], check=False)
+            for link in target_links:
+                subprocess.run(["uci", "add_list", f"podkop.{sec}.urltest_proxy_links={link}"], check=False)
+
         subprocess.run(["uci", "commit", "podkop"], check=False)
         subprocess.run(["/etc/init.d/podkop", "restart"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        print(f"Podkop успешно обновлен (секция '{target_section}')!")
+        print(f"Podkop успешно обновлен!")
 
         proto_counts = {}
         for l in best:
@@ -498,6 +575,7 @@ def main():
             m = medals[i] if i < len(medals) else "•"
             top_lines.append(f"{m} <code>{d} ms</code> (±{jit}) — {nm}")
         top_text = "\n".join(top_lines)
+        sections_block = "\n".join(section_reports)
 
         msg = (
             f"🟢 <b>SubParser: Podkop обновлен</b>\n\n"
@@ -505,6 +583,7 @@ def main():
             f"• Отобрано узлов: <b>{len(best)}</b> из {len(all_links)}\n"
             f"• Порог задержки: &lt; {threshold} ms\n"
             f"• Время анализа: <code>{elapsed}с</code>\n\n"
+            f"📁 <b>Секции Podkop:</b>\n{sections_block}\n\n"
             f"⚡ <b>Топ-3 быстрых узла:</b>\n{top_text}\n\n"
             f"🏷 <b>Протоколы:</b> <code>{proto_str}</code>"
         )
@@ -523,8 +602,7 @@ def main():
     else:
         count = len(best) if best else 0
         print(f"\n[!] Предупреждение: найдено всего {count} узлов (требуется минимум {MIN_REQUIRED_NODES}).")
-        print("[!] Текущий список серверов Podkop сохранен без изменений (защита от сетевого сбоя).")
-        print(f"Podkop успешно сохранен в резервном состоянии. (Время: {elapsed}с)")
+        print("[!] Конфигурация Podkop сохранена без изменений.")
         msg = f"🔴 <b>SubParser Alert</b>!\n" \
               f"Найдено всего {count} узлов. Конфигурация Podkop не изменена."
         send_telegram_notify(msg)

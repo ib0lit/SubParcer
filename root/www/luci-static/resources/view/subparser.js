@@ -6,10 +6,26 @@
 
 return view.extend({
     serverLinks: [],
+    availableSections: ['main'],
 
     load: function() {
-        return fs.exec('/usr/bin/subparser-helper.sh', ['get_links']).then(function(res) {
-            try { return JSON.parse(res.stdout.trim() || '[]'); } catch(e) { return []; }
+        var self = this;
+        return Promise.all([
+            fs.exec('/usr/bin/subparser-helper.sh', ['get_podkop_sections']).then(function(res) {
+                try { return JSON.parse(res.stdout.trim() || '["main"]'); } catch(e) { return ['main']; }
+            }),
+            fs.exec('/usr/bin/subparser-helper.sh', ['get_links', 'main']).then(function(res) {
+                try { return JSON.parse(res.stdout.trim() || '[]'); } catch(e) { return []; }
+            })
+        ]).then(function(data) {
+            self.availableSections = data[0];
+            return data[1];
+        });
+    },
+
+    handleSaveApply: function(ev, mode) {
+        return this.super('handleSaveApply', [ev, mode]).then(function() {
+            return fs.exec('/usr/bin/subparser-helper.sh', ['update_cron']);
         });
     },
 
@@ -25,17 +41,18 @@ return view.extend({
         return { proto: proto, name: name, raw: link };
     },
 
-    renderCards: function(container) {
+    renderCards: function(container, sec) {
         var self = this;
+        var s = sec || 'main';
         container.innerHTML = '';
         if (!this.serverLinks || this.serverLinks.length === 0) {
-            container.appendChild(E('div', { 'style': 'padding: 15px; color: #888;' }, _('В Podkop нет активных серверов. Выполните парсинг подписок выше.')));
+            container.appendChild(E('div', { 'style': 'padding: 15px; color: #888;' }, _('В выбранной секции Podkop [' + s + '] нет серверов.')));
             return;
         }
         var grid = E('div', { 'style': 'display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 15px;' });
         this.serverLinks.forEach(function(link, idx) {
             var info = self.parseNodeInfo(link);
-            var tag = 'main-' + (idx + 1) + '-out';
+            var tag = s + '-' + (idx + 1) + '-out';
             var card = E('div', {
                 'id': 'card_' + tag,
                 'style': 'background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; justify-content: space-between; color: #eee; box-shadow: 0 2px 4px rgba(0,0,0,0.2);'
@@ -57,104 +74,161 @@ return view.extend({
     render: function(loadedLinks) {
         var self = this;
         this.serverLinks = loadedLinks || [];
-        var m = new form.Map('subparser', _('SubParser'), _('Многопоточный парсер подписок с выбором User-Agent и ручным управлением узлами Podkop.'));
+        var m = new form.Map('subparser', _('SubParser'), _('Многопоточный парсер подписок с тонкой настройкой секций Podkop и дедупликацией.'));
 
-        var s = m.section(form.NamedSection, 'settings', 'subparser', _('Общие параметры'));
-        
-        var o = s.option(form.Flag, 'enabled', _('Включить сервис'));
+        var s = m.section(form.NamedSection, 'settings', 'subparser', _('Настройки сервиса'));
+        s.tab('general', _('⚙️ Основные настройки'));
+        s.tab('sections', _('📁 Секции Podkop'));
+        s.tab('telegram', _('💬 Telegram'));
+        s.tab('subscriptions', _('📋 Подписки'));
+
+        // ================= ВКЛАДКА 1: ОСНОВНЫЕ НАСТРОЙКИ =================
+        var o = s.taboption('general', form.Flag, 'enabled', _('Включить сервис'));
         o.rmempty = false;
 
-        o = s.option(form.ListValue, 'interval', _('Интервал автопроверки'));
-		o.value('30m', _('Каждые 30 минут'));
-		o.value('1h', _('Каждый 1 час'));
-		o.value('2h', _('Каждые 2 часа'));
-		o.value('3h', _('Каждые 3 часа'));
-		o.value('4h', _('Каждые 4 часа'));
-		o.value('6h', _('Каждые 6 часов'));
-		o.value('8h', _('Каждые 8 часов'));
-		o.value('12h', _('Каждые 12 часов'));
-		o.value('24h', _('Раз в сутки (в 04:00)'));
-		o.default = '3h';
+        o = s.taboption('general', form.ListValue, 'interval', _('Интервал автопроверки'));
+        o.value('never', _('Никогда'));
+        o.value('1h', _('1 час'));
+        o.value('12h', _('12 часов'));
+        o.value('24h', _('Раз в сутки (в полночь)'));
+        o.value('custom_daily', _('Ежедневно в точное время (ЧЧ:ММ)'));
+        o.value('custom_every_h', _('Каждые N часов в указанную минуту'));
+        o.default = 'never';
 
-		o = s.option(form.Value, 'tg_bot_token', _('Telegram Bot Token'));
-		o.placeholder = '123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ';
-		o.rmempty = true;
+        var ch = s.taboption('general', form.Value, 'custom_hour', _('Час (0-23)'));
+        ch.datatype = 'range(0, 23)';
+        ch.placeholder = '3';
+        ch.default = '3';
+        ch.depends('interval', 'custom_daily');
+        ch.depends('interval', 'custom_every_h');
 
-		o = s.option(form.Value, 'tg_chat_id', _('Telegram Chat ID'));
-		o.placeholder = '123456789';
-		o.rmempty = true;
+        var cm = s.taboption('general', form.Value, 'custom_minute', _('Минута (0-59)'));
+        cm.datatype = 'range(0, 59)';
+        cm.placeholder = '0';
+        cm.default = '0';
+        cm.depends('interval', 'custom_daily');
+        cm.depends('interval', 'custom_every_h');
 
-		o = s.option(form.Button, '_test_tg', _('Проверка связи'));
-		o.inputtitle = _('Отправить тест в Telegram');
-		o.inputstyle = 'action';
-		o.onclick = function(ev) {
-			var btn = ev.target;
-			btn.disabled = true;
-			btn.innerText = _('Отправка...');
-			return fs.exec('/usr/bin/subparser-helper.sh', ['test_tg']).then(function(res) {
-				btn.disabled = false;
-				btn.innerText = _('Отправить тест в Telegram');
-				var data = {};
-				try { data = JSON.parse(res.stdout.trim()); } catch(e) {}
-				if (data.status === 'ok') {
-					ui.addNotification(null, E('p', {}, _('Тестовое уведомление успешно отправлено!')), 'info');
-				} else {
-					ui.addNotification(null, E('p', {}, _('Ошибка: ') + (data.message || 'Сбой сети')), 'danger');
-				}
-			});
-		};
-
-		o = s.option(form.Value, 'ping_threshold', _('Порог задержки (мс)'));
+        o = s.taboption('general', form.Value, 'ping_threshold', _('Порог задержки (мс)'));
         o.datatype = 'uinteger';
         o.default = '350';
 
-        o = s.option(form.Flag, 'filter_ru', _('Фильтровать RU / обход узлы'));
+        o = s.taboption('general', form.ListValue, 'max_best_nodes', _('Лимит лучших узлов'));
+        o.value('0', _('Неограниченно'));
+        o.value('3', _('Топ-3'));
+        o.value('5', _('Топ-5'));
+        o.value('10', _('Топ-10'));
+        o.default = '0';
+
+        o = s.taboption('general', form.Flag, 'filter_ru', _('Фильтровать RU / обход узлы'));
         o.default = '1';
 
-        o = s.option(form.Button, '_run_now', _('Синхронизация'));
+        o = s.taboption('general', form.Button, '_run_now', _('Синхронизация'));
         o.inputtitle = _('Синхронизировать сейчас');
         o.inputstyle = 'apply';
         o.onclick = function() {
-			ui.showModal(_('Синхронизация'), [
-				E('p', { 'class': 'spinning' }, _('Тестирование и отбор узлов...')),
-				E('pre', {
-					'id': 'sync_live_log',
-					'style': 'max-height: 180px; overflow-y: auto; background: #111; color: #4af626; font-size: 11px; padding: 8px; border-radius: 4px; margin-top: 10px; text-align: left;'
-				}, 'Инициализация синхронизации...')
-			]);
+            ui.showModal(_('Синхронизация'), [
+                E('p', { 'class': 'spinning' }, _('Тестирование и отбор узлов...')),
+                E('pre', {
+                    'id': 'sync_live_log',
+                    'style': 'max-height: 180px; overflow-y: auto; background: #111; color: #4af626; font-size: 11px; padding: 8px; border-radius: 4px; margin-top: 10px; text-align: left;'
+                }, 'Инициализация синхронизации...')
+            ]);
 
-			return fs.exec('/usr/bin/subparser-helper.sh', ['bg_sync']).then(function() {
-				var poll = setInterval(function() {
-					fs.read_direct('/tmp/subparser_sync.log').then(function(logTxt) {
-						var el = document.getElementById('sync_live_log');
-						if (el && logTxt) {
-							el.textContent = logTxt;
-							el.scrollTop = el.scrollHeight;
-						}
-					});
+            return fs.exec('/usr/bin/subparser-helper.sh', ['bg_sync']).then(function() {
+                var poll = setInterval(function() {
+                    fs.read_direct('/tmp/subparser_sync.log').then(function(logTxt) {
+                        var el = document.getElementById('sync_live_log');
+                        if (el && logTxt) {
+                            el.textContent = logTxt;
+                            el.scrollTop = el.scrollHeight;
+                        }
+                    });
 
-					fs.exec('/usr/bin/subparser-helper.sh', ['check_sync']).then(function(cRes) {
-						var st = (cRes.stdout || '').trim();
-						if (st.indexOf('"done"') !== -1) {
-							clearInterval(poll);
-							setTimeout(function() {
-								ui.hideModal();
-								window.location.reload();
-							}, 800);
-						} else if (st.indexOf('"error"') !== -1) {
-							clearInterval(poll);
-							ui.hideModal();
-							ui.addNotification(null, E('p', _('Синхронизация завершилась с ошибкой. Проверьте лог.')), 'error');
-						}
-					});
-				}, 1500);
-			}).catch(function(err) {
-				ui.hideModal();
-				ui.addNotification(null, E('p', _('Ошибка вызова: ') + err.message), 'error');
-			});
-		};
+                    fs.exec('/usr/bin/subparser-helper.sh', ['check_sync']).then(function(cRes) {
+                        var st = (cRes.stdout || '').trim();
+                        if (st.indexOf('"done"') !== -1) {
+                            clearInterval(poll);
+                            setTimeout(function() {
+                                ui.hideModal();
+                                window.location.reload();
+                            }, 800);
+                        } else if (st.indexOf('"error"') !== -1) {
+                            clearInterval(poll);
+                            ui.hideModal();
+                            ui.addNotification(null, E('p', _('Синхронизация завершилась с ошибкой. Проверьте лог.')), 'error');
+                        }
+                    });
+                }, 1500);
+            }).catch(function(err) {
+                ui.hideModal();
+                ui.addNotification(null, E('p', _('Ошибка вызова: ') + err.message), 'error');
+            });
+        };
 
+        // ================= ВКЛАДКА 2: СЕКЦИИ PODKOP =================
+        var per_sec = s.taboption('sections', form.Flag, 'per_section_config', _('Индивидуальная настройка каждой секции'));
+        per_sec.description = _('Позволяет задать персональный режим обновления для каждого профиля Podkop.');
+        per_sec.default = '0';
+
+        // Глобальные настройки (когда флаг выключен)
+        var glob_sec = s.taboption('sections', form.DynamicList, 'target_section', _('Целевые секции Podkop'));
+        glob_sec.description = _('Выберите секции для обновления.');
+        self.availableSections.forEach(function(sec) { glob_sec.value(sec, sec); });
+        glob_sec.default = ['main'];
+        glob_sec.depends('per_section_config', '0');
+
+        var glob_mode = s.taboption('sections', form.ListValue, 'update_mode', _('Режим обновления'));
+        glob_mode.value('replace', _('Заменять все серверы'));
+        glob_mode.value('append', _('Добавлять к существующим (без дубликатов)'));
+        glob_mode.default = 'replace';
+        glob_mode.depends('per_section_config', '0');
+
+        // Индивидуальные настройки для каждой найденной секции (когда флаг включен)
+        self.availableSections.forEach(function(sec) {
+            var sec_en = s.taboption('sections', form.Flag, 'sec_en_' + sec, _('Обновлять секцию') + ' [' + sec + ']');
+            sec_en.default = '1';
+            sec_en.depends('per_section_config', '1');
+
+            var sec_m = s.taboption('sections', form.ListValue, 'sec_mode_' + sec, _('Режим для') + ' [' + sec + ']');
+            sec_m.value('replace', _('Заменять все серверы'));
+            sec_m.value('append', _('Добавлять к существующим (без дубликатов)'));
+            sec_m.default = 'replace';
+            sec_m.depends('per_section_config', '1');
+        });
+
+        // ================= ВКЛАДКА 3: TELEGRAM =================
+        o = s.taboption('telegram', form.Value, 'tg_bot_token', _('Telegram Bot Token'));
+        o.placeholder = '123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ';
+        o.rmempty = true;
+
+        o = s.taboption('telegram', form.Value, 'tg_chat_id', _('Telegram Chat ID'));
+        o.placeholder = '123456789';
+        o.rmempty = true;
+
+        o = s.taboption('telegram', form.Button, '_test_tg', _('Проверка связи'));
+        o.inputtitle = _('Отправить тест в Telegram');
+        o.inputstyle = 'action';
+        o.onclick = function(ev) {
+            var btn = ev.target;
+            btn.disabled = true;
+            btn.innerText = _('Отправка...');
+            return fs.exec('/usr/bin/subparser-helper.sh', ['test_tg']).then(function(res) {
+                btn.disabled = false;
+                btn.innerText = _('Отправить тест в Telegram');
+                var data = {};
+                try { data = JSON.parse(res.stdout.trim()); } catch(e) {}
+                if (data.status === 'ok') {
+                    ui.addNotification(null, E('p', {}, _('Тестовое уведомление успешно отправлено!')), 'info');
+                } else {
+                    ui.addNotification(null, E('p', {}, _('Ошибка: ') + (data.message || 'Сбой сети')), 'danger');
+                }
+            });
+        };
+
+        // ================= ВКЛАДКА 4: ПОДПИСКИ =================
         var s_subs = m.section(form.GridSection, 'subscription', _('Источники подписок'));
+        s_subs.tab = 'subscriptions';
         s_subs.addremove = true;
         s_subs.anonymous = true;
 
@@ -172,7 +246,7 @@ return view.extend({
         var sub_ua = s_subs.option(form.ListValue, 'user_agent', _('User-Agent'));
         sub_ua.value('flclash', 'FlClashX / ClashMeta (HWID)');
         sub_ua.value('incy', 'Incy (Android / Xiaomi)');
-		sub_ua.value('v2rayN', 'v2rayN/6.42');
+        sub_ua.value('v2rayN', 'v2rayN/6.42');
         sub_ua.value('clashmeta', 'Clash.Meta (Mihomo)');
         sub_ua.value('clash', 'Clash for Windows');
         sub_ua.value('singbox', 'Sing-box');
@@ -181,17 +255,35 @@ return view.extend({
         sub_ua.value('curl', 'curl (Generic)');
         sub_ua.default = 'v2rayN';
 
-        var s2 = m.section(form.NamedSection, 'settings', 'subparser', _('Активные узлы в Podkop'));
+        // ================= ДАШБОРД УЗЛОВ ВНИЗУ СТРАНИЦЫ =================
+        var s2 = m.section(form.NamedSection, 'settings', 'subparser', _('🌐 Активные узлы в конфигурации Podkop'));
         var dashboardContainer = E('div', { 'id': 'subparser_dashboard_box' });
 
-        var toolbar = E('div', { 'style': 'display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;' }, [
+        var currentSec = 'main';
+        var secSelect = E('select', {
+            'class': 'cbi-input-select',
+            'style': 'min-width: 140px; margin-right: 10px; font-weight: bold;',
+            'change': function(ev) {
+                currentSec = ev.target.value;
+                fs.exec('/usr/bin/subparser-helper.sh', ['get_links', currentSec]).then(function(res) {
+                    try { self.serverLinks = JSON.parse(res.stdout.trim() || '[]'); } catch(e) { self.serverLinks = []; }
+                    self.renderCards(dashboardContainer, currentSec);
+                });
+            }
+        });
+        self.availableSections.forEach(function(sname) {
+            secSelect.appendChild(E('option', { 'value': sname }, _('Секция: ') + sname));
+        });
+
+        var toolbar = E('div', { 'style': 'display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;' }, [
+            secSelect,
             E('button', {
                 'class': 'btn cbi-button-action',
-                'click': function(ev) { ev.preventDefault(); self.refreshPings(dashboardContainer); }
+                'click': function(ev) { ev.preventDefault(); self.refreshPings(dashboardContainer, currentSec); }
             }, _('⚡ Обновить пинги')),
             E('button', {
                 'class': 'btn cbi-button-positive',
-                'click': function(ev) { ev.preventDefault(); self.saveSelectedNodes(dashboardContainer); }
+                'click': function(ev) { ev.preventDefault(); self.saveSelectedNodes(dashboardContainer, currentSec); }
             }, _('💾 Применить выбранные узлы')),
             E('button', {
                 'class': 'btn cbi-button-neutral',
@@ -209,14 +301,15 @@ return view.extend({
         dummy.render = function() { return E('div', {}, [toolbar, dashboardContainer]); };
         self.renderCards(dashboardContainer);
 
-		return m.render();
+        return m.render();
     },
 
-    refreshPings: function(container) {
+    refreshPings: function(container, sec) {
+        var s = sec || 'main';
         var badges = container.querySelectorAll('.node-delay-badge');
         badges.forEach(function(b) { b.innerText = '...'; b.style.color = '#888'; });
 
-        fs.exec('/usr/bin/subparser-helper.sh', ['ping_group']).then(function(res) {
+        fs.exec('/usr/bin/subparser-helper.sh', ['ping_group', s]).then(function(res) {
             var groupDelays = {};
             try { groupDelays = JSON.parse(res.stdout.trim() || '{}'); } catch(e) {}
 
@@ -247,7 +340,8 @@ return view.extend({
         });
     },
 
-    saveSelectedNodes: function(container) {
+    saveSelectedNodes: function(container, sec) {
+        var s = sec || 'main';
         var checkboxes = container.querySelectorAll('input[type="checkbox"]:checked');
         var selectedLinks = [];
         checkboxes.forEach(function(cb) {
@@ -260,11 +354,11 @@ return view.extend({
             return;
         }
 
-        ui.showModal(_('Сохранение'), [ E('p', { 'class': 'spinning' }, _('Запись выбранных узлов в Podkop (' + selectedLinks.length + ' шт.)...')) ]);
+        ui.showModal(_('Сохранение'), [ E('p', { 'class': 'spinning' }, _('Запись выбранных узлов в секцию ' + s + ' (' + selectedLinks.length + ' шт.)...')) ]);
         var payload = selectedLinks.join('\n') + '\n';
 
         fs.write('/tmp/subparser_selected.txt', payload).then(function() {
-            return fs.exec('/usr/bin/subparser-helper.sh', ['save_selected']);
+            return fs.exec('/usr/bin/subparser-helper.sh', ['save_selected', s]);
         }).then(function() {
             ui.hideModal();
             ui.addNotification(null, E('p', {}, _('Серверы успешно сохранены в Podkop! (' + selectedLinks.length + ' шт.)')), 'info');

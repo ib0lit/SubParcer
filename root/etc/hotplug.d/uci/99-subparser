@@ -1,0 +1,2 @@
+#!/bin/sh
+[ "$PACKAGE" = "subparser" ] && /etc/init.d/subparser restart

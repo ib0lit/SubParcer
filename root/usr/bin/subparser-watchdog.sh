@@ -25,18 +25,24 @@ if ! pidof sing-box >/dev/null 2>&1; then
     sleep 3
 fi
 
+LAN_IP=$(uci -q get network.lan.ipaddr | cut -d'/' -f1)
+[ -z "$LAN_IP" ] && LAN_IP="192.168.1.1"
+
+CHECK_SEC=$(uci -q get subparser.settings.target_section | awk '{print $1}')
+[ -z "$CHECK_SEC" ] && CHECK_SEC="main"
+
 TEST_URL="https%3A%2F%2Fcp.cloudflare.com%2Fgenerate_204"
-RESP=$(curl -s -m 6 "http://192.168.1.1:9090/proxies/main-urltest-out/delay?url=${TEST_URL}&timeout=4000" 2>/dev/null)
+RESP=$(curl -s -m 6 "http://${LAN_IP}:9090/proxies/${CHECK_SEC}-urltest-out/delay?url=${TEST_URL}&timeout=4000" 2>/dev/null)
 DELAY=$(echo "$RESP" | grep -o '"delay":[0-9]*' | cut -d':' -f2)
 
 if [ -z "$DELAY" ] || [ "$DELAY" -le 0 ]; then
     sleep 4
-    RESP=$(curl -s -m 6 "http://192.168.1.1:9090/proxies/main-urltest-out/delay?url=${TEST_URL}&timeout=4000" 2>/dev/null)
+    RESP=$(curl -s -m 6 "http://${LAN_IP}:9090/proxies/${CHECK_SEC}-urltest-out/delay?url=${TEST_URL}&timeout=4000" 2>/dev/null)
     DELAY=$(echo "$RESP" | grep -o '"delay":[0-9]*' | cut -d':' -f2)
 fi
 
 if [ -z "$DELAY" ] || [ "$DELAY" -le 0 ]; then
-    notify "⚠️ <b>Сбой проксирования Podkop!</b>%0AВсе узлы в пуле перестали отвечать. Запускаю экстренный парсинг свежих серверов..."
+    notify "⚠️ <b>Сбой проксирования Podkop!</b>%0AУзлы в секции [${CHECK_SEC}] не отвечают. Запускаю экстренный парсинг..."
     rm -f /var/run/subparser.lock
     /usr/bin/python3 /usr/bin/subparser.py --force >/dev/null 2>&1 &
 fi
