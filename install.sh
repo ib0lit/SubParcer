@@ -8,15 +8,28 @@ VERSION_FILE="/etc/subparser_version"
 
 echo "=== [1/6] Определение пакетного менеджера и зависимостей ==="
 if command -v apk >/dev/null 2>&1; then
-    echo "[*] Обнаружен менеджер apk (OpenWrt 24+ / 25+)"
+    echo "[*] Обнаружен менеджер apk (OpenWrt 25+)"
     apk update
-    apk add python3 python3-urllib conntrack curl
+    apk add python3 python3-urllib conntrack curl ca-certificates
 elif command -v opkg >/dev/null 2>&1; then
-    echo "[*] Обнаружен менеджер opkg (OpenWrt 21, 22, 23)"
+    echo "[*] Обнаружен менеджер opkg (OpenWrt 21-24)"
     opkg update
-    opkg install python3 python3-urllib python3-ssl conntrack curl
+    # Базовые системные зависимости
+    opkg install python3 python3-urllib conntrack curl ca-bundle ca-certificates
+    # Пакет python3-ssl опционален: в OpenWrt 24+ ssl уже включен в базовый python3
+    opkg install python3-ssl 2>/dev/null || true
 else
     echo "[!] Предупреждение: пакетный менеджер не найден. Пропуск шага."
+fi
+
+# Проверка готовности модуля SSL в Python3
+if ! python3 -c "import ssl" >/dev/null 2>&1; then
+    echo "[!] Модуль ssl не найден. Пробуем установить openssl/cryptography..."
+    if command -v apk >/dev/null 2>&1; then
+        apk add python3-cryptography 2>/dev/null || true
+    else
+        opkg install python3-cryptography 2>/dev/null || opkg install python3-openssl 2>/dev/null || true
+    fi
 fi
 
 echo "=== [2/6] Загрузка компонентов с GitHub ==="
@@ -36,15 +49,16 @@ fi
 
 mkdir -p /etc/init.d /usr/bin /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/view
 
-cp -f "${SRC_PATH}/etc/init.d/"* /etc/init.d/
-cp -f "${SRC_PATH}/usr/bin/"* /usr/bin/
-cp -f "${SRC_PATH}/usr/share/luci/menu.d/"* /usr/share/luci/menu.d/
-cp -f "${SRC_PATH}/usr/share/rpcd/acl.d/"* /usr/share/rpcd/acl.d/
-cp -f "${SRC_PATH}/www/luci-static/resources/view/"* /www/luci-static/resources/view/
+cp -f "${SRC_PATH}/etc/init.d/"* /etc/init.d/ 2>/dev/null || true
+cp -f "${SRC_PATH}/usr/bin/"* /usr/bin/ 2>/dev/null || true
+cp -f "${SRC_PATH}/usr/share/luci/menu.d/"* /usr/share/luci/menu.d/ 2>/dev/null || true
+cp -f "${SRC_PATH}/usr/share/rpcd/acl.d/"* /usr/share/rpcd/acl.d/ 2>/dev/null || true
+cp -f "${SRC_PATH}/www/luci-static/resources/view/"* /www/luci-static/resources/view/ 2>/dev/null || true
 
 echo "=== [4/6] Настройка прав доступа ==="
-chmod +x /etc/init.d/subparser /etc/init.d/subparser-bot
-chmod +x /usr/bin/subparser*
+[ -f /etc/init.d/subparser ] && chmod +x /etc/init.d/subparser
+[ -f /etc/init.d/subparser-bot ] && chmod +x /etc/init.d/subparser-bot
+chmod +x /usr/bin/subparser* 2>/dev/null || true
 
 echo "=== [5/6] Регистрация задач и фиксация версии ==="
 # Добавление watchdog в планировщик, если его еще нет
@@ -62,11 +76,15 @@ if [ -n "$REMOTE_SHA" ]; then
     echo "$REMOTE_SHA" > "$VERSION_FILE"
 fi
 
-/etc/init.d/subparser enable
-/etc/init.d/subparser start
+if [ -f /etc/init.d/subparser ]; then
+    /etc/init.d/subparser enable
+    /etc/init.d/subparser start
+fi
 
-/etc/init.d/subparser-bot enable
-/etc/init.d/subparser-bot start
+if [ -f /etc/init.d/subparser-bot ]; then
+    /etc/init.d/subparser-bot enable
+    /etc/init.d/subparser-bot start
+fi
 
 echo "=== [6/6] Обновление кэша LuCI ==="
 rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
