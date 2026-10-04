@@ -44,21 +44,30 @@ def send_telegram_notify(text):
 
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         data = urllib.parse.urlencode({"chat_id": chat_id, "text": text, "parse_mode": "HTML"}).encode("utf-8")
+
+        print("[*] Ожидание готовности сети для отправки отчета в Telegram...")
         time.sleep(5)
 
-        for attempt in range(1, 6):
+        max_attempts = 20
+        retry_delay = 15
+
+        for attempt in range(1, max_attempts + 1):
             try:
                 req = urllib.request.Request(url, data=data, headers={"User-Agent": "OpenWrt-SubParser"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
+                with urllib.request.urlopen(req, timeout=6) as resp:
                     if resp.status == 200:
-                        print("[OK] Уведомление в Telegram успешно доставлено.")
+                        print(f"[OK] Уведомление успешно доставлено в Telegram (попытка {attempt}/{max_attempts}).")
                         return
             except Exception as net_err:
-                if attempt == 5:
-                    print(f"[!] Ошибка отправки в Telegram (попытка {attempt}/5): {net_err}")
-                time.sleep(3)
+                if attempt < max_attempts:
+                    print(f"  [!] Нет связи с Telegram (попытка {attempt}/{max_attempts}). Повтор через {retry_delay}с...")
+                    time.sleep(retry_delay)
+                else:
+                    print(f"  [!] Финальная попытка {attempt}/{max_attempts} не удалась: {net_err}")
+
+        print("[!] Превышен лимит ожидания (~5.5 минут). Уведомление не доставлено.")
     except Exception as e:
-        print(f"[!] Ошибка Telegram: {e}")
+        print(f"[!] Ошибка отправки: {e}")
 
 def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
