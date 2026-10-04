@@ -506,9 +506,16 @@ def get_sections_menu_screen():
     if not per_sec:
         raw_targets = get_uci_val("target_section", "main").split()
         target_set = set(raw_targets) if raw_targets else {"main"}
-        
-        status_text = "🌐 <b>Общий режим обновления</b>\nВсе выбранные секции обновляются в одинаковом режиме."
+        g_mode = get_uci_val("update_mode", "replace")
+        mode_label = "🔄 Замена серверов" if g_mode == "replace" else "➕ Добавление (без дублей)"
+
+        status_text = (
+            "🌐 <b>Общий режим обновления</b>\n"
+            f"Текущее действие: <b>{mode_label}</b>\n"
+            "Все выбранные секции обновляются по единому правилу."
+        )
         keyboard.append([{"text": "Индивидуальный режим: ❌ ВЫКЛ", "callback_data": "toggle_per_sec"}])
+        keyboard.append([{"text": f"Режим: {mode_label}", "callback_data": "toggle_glob_mode"}])
         
         sec_buttons = []
         for s in all_secs:
@@ -913,6 +920,15 @@ def main():
 
                     elif data == "bot_sections_menu":
                         answer_callback(token, cb_id)
+                        t, kb = get_sections_menu_screen()
+                        edit_msg(token, chat_id, msg_id, t, kb)
+
+                    elif data == "toggle_glob_mode":
+                        cur = get_uci_val("update_mode", "replace")
+                        new_val = "append" if cur == "replace" else "replace"
+                        set_uci_val("update_mode", new_val)
+                        badge = "Замена" if new_val == "replace" else "Добавление"
+                        answer_callback(token, cb_id, f"Режим: {badge}")
                         t, kb = get_sections_menu_screen()
                         edit_msg(token, chat_id, msg_id, t, kb)
 
