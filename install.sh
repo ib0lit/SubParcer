@@ -4,6 +4,7 @@ set -e
 REPO_USER="ib0lit"
 REPO_NAME="SubParser"
 BRANCH="main"
+COMMIT_FILE="/etc/subparser_commit"
 VERSION_FILE="/etc/subparser_version"
 
 echo "=== [1/6] Определение пакетного менеджера и зависимостей ==="
@@ -12,11 +13,11 @@ set +e
 if command -v apk >/dev/null 2>&1; then
     echo "[*] Обнаружен менеджер apk (OpenWrt 25+)"
     apk update
-    apk add python3 python3-urllib conntrack curl ca-certificates
+    apk add python3 conntrack curl ca-certificates
 elif command -v opkg >/dev/null 2>&1; then
     echo "[*] Обнаружен менеджер opkg (OpenWrt 21-24)"
     opkg update
-    opkg install python3 python3-urllib conntrack curl ca-bundle ca-certificates
+    opkg install python3 conntrack curl ca-bundle ca-certificates
 else
     echo "[!] Предупреждение: пакетный менеджер не найден. Пропуск шага."
 fi
@@ -37,7 +38,6 @@ mkdir -p /etc/config /etc/init.d /usr/bin /usr/share/luci/menu.d /usr/share/rpcd
 if [ ! -f /etc/config/subparser ]; then
     cp -f "${SRC_PATH}/etc/config/subparser" /etc/config/subparser
 else
-    # Сохраняем существующие учетные данные и ссылки, дописывая только новые опции
     set_default_uci() {
         local opt="$1"
         local val="$2"
@@ -54,9 +54,11 @@ else
     set_default_uci "per_section_config" "0"
     set_default_uci "update_mode" "replace"
     set_default_uci "sec_mode_main" "replace"
+    set_default_uci "sec_en_main" "1"
     if [ -z "$(uci -q get subparser.settings.target_section)" ]; then
         uci -q add_list subparser.settings.target_section='main'
     fi
+    uci -q delete subparser.settings.cron_interval 2>/dev/null || true
     uci -q delete subparser.settings.custom_interval_min 2>/dev/null || true
     uci commit subparser
 fi
@@ -66,16 +68,23 @@ cp -f "${SRC_PATH}/usr/bin/"* /usr/bin/ 2>/dev/null || true
 cp -f "${SRC_PATH}/usr/share/luci/menu.d/"* /usr/share/luci/menu.d/ 2>/dev/null || true
 cp -f "${SRC_PATH}/usr/share/rpcd/acl.d/"* /usr/share/rpcd/acl.d/ 2>/dev/null || true
 cp -f "${SRC_PATH}/www/luci-static/resources/view/"* /www/luci-static/resources/view/ 2>/dev/null || true
+[ -f "${SRC_PATH}/etc/subparser_version" ] && cp -f "${SRC_PATH}/etc/subparser_version" /etc/subparser_version
 [ -d "${SRC_PATH}/etc/hotplug.d/uci" ] && cp -f "${SRC_PATH}/etc/hotplug.d/uci/"* /etc/hotplug.d/uci/ 2>/dev/null || true
+
+# Удаление старого ACL-дубликата
+rm -f /usr/share/rpcd/acl.d/subparser.json 2>/dev/null || true
 
 echo "=== [4/6] Настройка прав доступа ==="
 chmod +x /etc/init.d/subparser /etc/init.d/subparser-bot 2>/dev/null || true
 chmod +x /usr/bin/subparser* 2>/dev/null || true
 
 echo "=== [5/6] Регистрация задач и автозапуск ==="
-if ! crontab -l 2>/dev/null | grep -q "subparser-watchdog.sh"; then
-    (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/bin/subparser-watchdog.sh >/dev/null 2>&1") | crontab -
-fi
+CRON_TMP="/tmp/cron_subparser_inst.tmp"
+crontab -l 2>/dev/null | grep -v "subparser-watchdog.sh" > "$CRON_TMP" || true
+echo "*/5 * * * * /usr/bin/subparser-watchdog.sh >/dev/null 2>&1" >> "$CRON_TMP"
+crontab "$CRON_TMP" 2>/dev/null || true
+rm -f "$CRON_TMP"
+/etc/init.d/cron restart >/dev/null 2>&1 || true
 
 REMOTE_SHA=$(curl -sL \
   -H "User-Agent: OpenWrt-SubParser-Installer" \
@@ -83,13 +92,12 @@ REMOTE_SHA=$(curl -sL \
   | grep '"sha":' | head -n 1 | cut -d '"' -f 4)
 
 if [ -n "$REMOTE_SHA" ]; then
-    echo "$REMOTE_SHA" > "$VERSION_FILE"
+    echo "$REMOTE_SHA" > "$COMMIT_FILE"
 fi
 
 /etc/init.d/subparser enable
 /etc/init.d/subparser-bot enable
 
-# Запускаем службы только если сервис активирован в конфиге
 EN=$(uci -q get subparser.settings.enabled)
 if [ "$EN" = "1" ]; then
     /etc/init.d/subparser start

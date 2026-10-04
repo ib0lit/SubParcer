@@ -10,28 +10,31 @@ echo "=== [1/5] Остановка и отключение служб ==="
 
 killall -9 subparser.py subparser-bot.py subparser-watchdog.sh >/dev/null 2>&1 || true
 
-# Очистка таблицы блокировок bot_block в nftables
+# Очистка динамической таблицы файрвола bot_block
 nft delete table inet bot_block >/dev/null 2>&1 || true
 
 echo "=== [2/5] Удаление задач планировщика (cron) ==="
-if crontab -l 2>/dev/null | grep -q "subparser"; then
-    crontab -l 2>/dev/null | grep -v "subparser" | crontab -
-fi
+CRON_TMP="/tmp/cron_subparser_uninst.tmp"
+crontab -l 2>/dev/null | grep -v "subparser" > "$CRON_TMP" || true
+crontab "$CRON_TMP" 2>/dev/null || true
+rm -f "$CRON_TMP"
+/etc/init.d/cron restart >/dev/null 2>&1 || true
 
 echo "=== [3/5] Удаление файлов приложения ==="
 rm -f /usr/bin/subparser*
 rm -f /etc/init.d/subparser /etc/init.d/subparser-bot
 rm -f /etc/hotplug.d/uci/99-subparser 2>/dev/null || true
-rm -f /etc/subparser_version
-rm -f /tmp/subparser* /tmp/bot_blocked_macs.json /tmp/subparser_last_update 2>/dev/null || true
+rm -f /etc/subparser_version /etc/subparser_commit 2>/dev/null || true
+rm -f /tmp/subparser* /tmp/bot_blocked_macs.json /tmp/subparser_bot_state.json 2>/dev/null || true
+rm -f /var/run/subparser.lock 2>/dev/null || true
 
 echo "=== [4/5] Удаление файлов интерфейса LuCI ==="
 rm -f /usr/share/luci/menu.d/luci-app-subparser.json
 rm -f /usr/share/rpcd/acl.d/luci-app-subparser.json
-rm -f /usr/share/rpcd/acl.d/subparser.json
+rm -f /usr/share/rpcd/acl.d/subparser.json 2>/dev/null || true
 rm -f /www/luci-static/resources/view/subparser.js
 
-# Удаляем файл настроек
+# Удаление конфигурации
 rm -f /etc/config/subparser
 
 echo "=== [5/5] Очистка кэша веб-интерфейса ==="
@@ -42,5 +45,5 @@ rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
 echo ""
 echo "=========================================================="
 echo " [OK] SubParser полностью удален с маршрутизатора!"
-echo " Меню LuCI, таблицы файрвола и фоновые процессы очищены."
+echo " Меню LuCI, расписание cron и фоновые процессы очищены."
 echo "=========================================================="

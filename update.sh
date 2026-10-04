@@ -4,6 +4,7 @@ set -e
 REPO_USER="ib0lit"
 REPO_NAME="SubParser"
 BRANCH="main"
+COMMIT_FILE="/etc/subparser_commit"
 VERSION_FILE="/etc/subparser_version"
 
 echo "=== [1/4] Проверка наличия обновлений ==="
@@ -16,13 +17,14 @@ REMOTE_SHA=$(curl -sL \
 if [ -z "$REMOTE_SHA" ]; then
     echo "[!] Не удалось определить версию на GitHub. Выполняем принудительное обновление..."
 else
-    if [ -f "$VERSION_FILE" ]; then
-        LOCAL_SHA=$(cat "$VERSION_FILE" 2>/dev/null || true)
+    if [ -f "$COMMIT_FILE" ]; then
+        LOCAL_SHA=$(cat "$COMMIT_FILE" 2>/dev/null || true)
         if [ "$LOCAL_SHA" = "$REMOTE_SHA" ]; then
+            CURRENT_VER=$(cat "$VERSION_FILE" 2>/dev/null || echo "v2.x")
             echo ""
             echo "=========================================================="
-            echo " [i] Обновлений нет. У вас установлена актуальная версия!"
-            echo " SHA коммита: ${LOCAL_SHA}"
+            echo " [i] Обновлений нет. Установлена актуальная версия: ${CURRENT_VER}"
+            echo " SHA коммита: ${LOCAL_SHA:0:7}"
             echo "=========================================================="
             exit 0
         fi
@@ -46,11 +48,15 @@ cp -f "${SRC_PATH}/etc/init.d/"* /etc/init.d/
 cp -f "${SRC_PATH}/usr/share/luci/menu.d/"* /usr/share/luci/menu.d/
 cp -f "${SRC_PATH}/usr/share/rpcd/acl.d/"* /usr/share/rpcd/acl.d/
 cp -f "${SRC_PATH}/www/luci-static/resources/view/"* /www/luci-static/resources/view/
+[ -f "${SRC_PATH}/etc/subparser_version" ] && cp -f "${SRC_PATH}/etc/subparser_version" /etc/subparser_version
 [ -d "${SRC_PATH}/etc/hotplug.d/uci" ] && cp -f "${SRC_PATH}/etc/hotplug.d/uci/"* /etc/hotplug.d/uci/ 2>/dev/null || true
+
+# Удаление устаревшего ACL-дубликата, если он остался от прошлых версий
+rm -f /usr/share/rpcd/acl.d/subparser.json 2>/dev/null || true
 
 chmod +x /usr/bin/subparser* /etc/init.d/subparser*
 
-# --- Мягкая миграция UCI-конфига (сохраняем токен, чат и подписки) ---
+# --- Мягкая миграция UCI-конфига ---
 set_default_uci() {
     local opt="$1"
     local val="$2"
@@ -68,25 +74,27 @@ set_default_uci "filter_ru" "1"
 set_default_uci "per_section_config" "0"
 set_default_uci "update_mode" "replace"
 set_default_uci "sec_mode_main" "replace"
+set_default_uci "sec_en_main" "1"
 
 if [ -z "$(uci -q get subparser.settings.target_section)" ]; then
     uci -q add_list subparser.settings.target_section='main'
 fi
 
+# Вычищаем старые параметры, если они существовали
+uci -q delete subparser.settings.cron_interval 2>/dev/null || true
 uci -q delete subparser.settings.custom_interval_min 2>/dev/null || true
 uci commit subparser
 
 if [ -n "$REMOTE_SHA" ]; then
-    echo "$REMOTE_SHA" > "$VERSION_FILE"
+    echo "$REMOTE_SHA" > "$COMMIT_FILE"
 fi
 
 echo "=== [4/4] Перезапуск служб и очистка кэша LuCI ==="
-/etc/init.d/subparser restart >/dev/null 2>&1 || /etc/init.d/subparser start
+/etc/init.d/subparser restart >/dev/null 2>&1 || true
 
-# Бот перезапускается только если сервис включен
 EN=$(uci -q get subparser.settings.enabled)
 if [ "$EN" = "1" ]; then
-    /etc/init.d/subparser-bot restart >/dev/null 2>&1 || /etc/init.d/subparser-bot start
+    /etc/init.d/subparser-bot restart >/dev/null 2>&1 || true
 else
     /etc/init.d/subparser-bot stop >/dev/null 2>&1 || true
 fi
@@ -96,8 +104,9 @@ rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
 
 rm -rf "$TMP_DIR"
 
+NEW_VER=$(cat "$VERSION_FILE" 2>/dev/null || echo "2.0.0")
 echo ""
 echo "=========================================================="
-echo " [OK] SubParser успешно обновлен до последней версии!"
-echo " Новые параметры добавлены, подписки и токены сохранены."
+echo " [OK] SubParser успешно обновлен до версии ${NEW_VER}!"
+echo " Все подписки, настройки и токен бота сохранены."
 echo "=========================================================="
