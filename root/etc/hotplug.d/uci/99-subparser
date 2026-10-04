@@ -1,2 +1,11 @@
 #!/bin/sh
-[ "$PACKAGE" = "subparser" ] && /etc/init.d/subparser restart
+if [ "$PACKAGE" = "subparser" ]; then
+    /etc/init.d/subparser restart >/dev/null 2>&1 || true
+    
+    EN=$(uci -q get subparser.settings.enabled)
+    if [ "$EN" = "1" ]; then
+        /etc/init.d/subparser-bot restart >/dev/null 2>&1 || true
+    else
+        /etc/init.d/subparser-bot stop >/dev/null 2>&1 || true
+    fi
+fi
