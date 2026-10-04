@@ -579,8 +579,7 @@ def get_parser_menu_screen(prompt_custom_ping=False):
                 {"text": f"📁 Секции: {sec_summary[:22]}", "callback_data": "bot_sections_menu"}
             ],
             [
-                {"text": "🔄 Запустить (Замена)", "callback_data": "run_replace"},
-                {"text": "➕ Запустить (Добавление)", "callback_data": "run_append"}
+                {"text": "▶️ Запустить синхронизацию", "callback_data": "run_parser"}
             ],
             [
                 {"text": "📄 Лог парсера", "callback_data": "view_log"},
@@ -820,10 +819,19 @@ def run_parser_process(mode_override=None):
     subprocess.Popen(["/usr/bin/subparser.py", "--force"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return True, "⏳ <b>Парсинг подписок и замер узлов запущены!</b>\nИтоговый отчет поступит отдельным сообщением."
 
+def setup_bot_commands(token):
+    commands = [
+        {"command": "menu", "description": "🎛 Главное меню управления"}
+    ]
+    tg_api(token, "setMyCommands", {"commands": commands})
+
 def main():
     offset = 0
     print("[*] SubParser Bot запущен...")
     init_bot_firewall()
+    token_init, _ = check_credentials()
+    if token_init:
+        setup_bot_commands(token_init)
     
     while True:
         token, admin_id = check_credentials()
@@ -980,23 +988,14 @@ def main():
                         t, kb = get_parser_menu_screen()
                         edit_msg(token, chat_id, msg_id, t, kb)
 
-                    elif data == "run_replace":
-                        ok, text_sync = run_parser_process(mode_override="replace")
-                        answer_callback(token, cb_id, "Запуск в режиме замены...")
+                    elif data == "run_parser":
+                        ok, text_sync = run_parser_process()
+                        answer_callback(token, cb_id, "Запуск парсера...")
                         kb_sync = {"inline_keyboard": [
                             [{"text": "📊 Статус выполнения", "callback_data": "status"}],
                             [{"text": "◀️ Меню парсера", "callback_data": "parser_menu"}]
                         ]}
-                        edit_msg(token, chat_id, msg_id, f"🔄 <b>Режим: Полная замена серверов</b>\n\n{text_sync}", kb_sync)
-
-                    elif data == "run_append":
-                        ok, text_sync = run_parser_process(mode_override="append")
-                        answer_callback(token, cb_id, "Запуск в режиме добавления...")
-                        kb_sync = {"inline_keyboard": [
-                            [{"text": "📊 Статус выполнения", "callback_data": "status"}],
-                            [{"text": "◀️ Меню парсера", "callback_data": "parser_menu"}]
-                        ]}
-                        edit_msg(token, chat_id, msg_id, f"➕ <b>Режим: Добавление без дубликатов</b>\n\n{text_sync}", kb_sync)
+                        edit_msg(token, chat_id, msg_id, f"▶️ <b>Синхронизация по текущей конфигурации</b>\n\n{text_sync}", kb_sync)
 
                     elif data == "sysinfo":
                         answer_callback(token, cb_id)
