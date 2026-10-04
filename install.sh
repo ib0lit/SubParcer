@@ -7,7 +7,6 @@ BRANCH="main"
 VERSION_FILE="/etc/subparser_version"
 
 echo "=== [1/6] Определение пакетного менеджера и зависимостей ==="
-# Временно отключаем строгий выход по ошибке на этапе пакетов
 set +e
 
 if command -v apk >/dev/null 2>&1; then
@@ -17,13 +16,11 @@ if command -v apk >/dev/null 2>&1; then
 elif command -v opkg >/dev/null 2>&1; then
     echo "[*] Обнаружен менеджер opkg (OpenWrt 21-24)"
     opkg update
-    # Ставим только гарантированно существующие пакеты OpenWrt 21-24
     opkg install python3 python3-urllib conntrack curl ca-bundle ca-certificates
 else
     echo "[!] Предупреждение: пакетный менеджер не найден. Пропуск шага."
 fi
 
-# Возвращаем строгий режим после проверки пакетов
 set -e
 
 echo "=== [2/6] Загрузка компонентов с GitHub ==="
@@ -34,26 +31,48 @@ mkdir -p "$TMP_DIR"
 curl -sL "https://github.com/${REPO_USER}/${REPO_NAME}/archive/refs/heads/${BRANCH}.tar.gz?nocache=$(date +%s)" | tar -xz -C "$TMP_DIR"
 SRC_PATH="${TMP_DIR}/${REPO_NAME}-${BRANCH}/root"
 
-echo "=== [3/6] Развертывание системных файлов ==="
-if [ ! -f /etc/config/subparser ]; then
-    mkdir -p /etc/config
-    cp -f "${SRC_PATH}/etc/config/subparser" /etc/config/subparser
-fi
+echo "=== [3/6] Развертывание системных файлов и конфигурации ==="
+mkdir -p /etc/config /etc/init.d /usr/bin /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/view /etc/hotplug.d/uci
 
-mkdir -p /etc/init.d /usr/bin /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/view
+if [ ! -f /etc/config/subparser ]; then
+    cp -f "${SRC_PATH}/etc/config/subparser" /etc/config/subparser
+else
+    # Если конфиг уже был — дописываем только отсутствующие новые параметры
+    set_default_uci() {
+        local opt="$1"
+        local val="$2"
+        if [ -z "$(uci -q get subparser.settings.${opt})" ]; then
+            uci -q set subparser.settings.${opt}="${val}"
+        fi
+    }
+    set_default_uci "custom_hour" "3"
+    set_default_uci "custom_minute" "0"
+    set_default_uci "ping_threshold" "350"
+    set_default_uci "max_jitter" "150"
+    set_default_uci "max_best_nodes" "0"
+    set_default_uci "filter_ru" "1"
+    set_default_uci "per_section_config" "0"
+    set_default_uci "update_mode" "replace"
+    set_default_uci "sec_mode_main" "replace"
+    if [ -z "$(uci -q get subparser.settings.target_section)" ]; then
+        uci -q add_list subparser.settings.target_section='main'
+    fi
+    uci -q delete subparser.settings.custom_interval_min 2>/dev/null || true
+    uci commit subparser
+fi
 
 cp -f "${SRC_PATH}/etc/init.d/"* /etc/init.d/ 2>/dev/null || true
 cp -f "${SRC_PATH}/usr/bin/"* /usr/bin/ 2>/dev/null || true
 cp -f "${SRC_PATH}/usr/share/luci/menu.d/"* /usr/share/luci/menu.d/ 2>/dev/null || true
 cp -f "${SRC_PATH}/usr/share/rpcd/acl.d/"* /usr/share/rpcd/acl.d/ 2>/dev/null || true
 cp -f "${SRC_PATH}/www/luci-static/resources/view/"* /www/luci-static/resources/view/ 2>/dev/null || true
+[ -d "${SRC_PATH}/etc/hotplug.d/uci" ] && cp -f "${SRC_PATH}/etc/hotplug.d/uci/"* /etc/hotplug.d/uci/ 2>/dev/null || true
 
 echo "=== [4/6] Настройка прав доступа ==="
-[ -f /etc/init.d/subparser ] && chmod +x /etc/init.d/subparser
-[ -f /etc/init.d/subparser-bot ] && chmod +x /etc/init.d/subparser-bot
+chmod +x /etc/init.d/subparser /etc/init.d/subparser-bot 2>/dev/null || true
 chmod +x /usr/bin/subparser* 2>/dev/null || true
 
-echo "=== [5/6] Регистрация задач и фиксация версии ==="
+echo "=== [5/6] Регистрация задач и автозапуск ==="
 if ! crontab -l 2>/dev/null | grep -q "subparser-watchdog.sh"; then
     (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/bin/subparser-watchdog.sh >/dev/null 2>&1") | crontab -
 fi
@@ -67,15 +86,11 @@ if [ -n "$REMOTE_SHA" ]; then
     echo "$REMOTE_SHA" > "$VERSION_FILE"
 fi
 
-if [ -f /etc/init.d/subparser ]; then
-    /etc/init.d/subparser enable
-    /etc/init.d/subparser start
-fi
+/etc/init.d/subparser enable
+/etc/init.d/subparser start
 
-if [ -f /etc/init.d/subparser-bot ]; then
-    /etc/init.d/subparser-bot enable
-    /etc/init.d/subparser-bot start
-fi
+/etc/init.d/subparser-bot enable
+/etc/init.d/subparser-bot start
 
 echo "=== [6/6] Обновление кэша LuCI ==="
 rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
@@ -86,8 +101,5 @@ rm -rf "$TMP_DIR"
 echo ""
 echo "=========================================================="
 echo " [OK] SubParser успешно установлен!"
-if [ -f "$VERSION_FILE" ]; then
-    echo " Установленная версия (SHA): $(cat "$VERSION_FILE")"
-fi
 echo " Откройте веб-интерфейс: LuCI -> 'Службы' -> 'SubParser'"
 echo "=========================================================="
