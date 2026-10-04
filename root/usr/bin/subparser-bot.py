@@ -9,6 +9,7 @@ import socket
 import subprocess
 import urllib.request
 import urllib.parse
+import html
 from concurrent.futures import ThreadPoolExecutor
 
 CONFIG_NAME = "subparser"
@@ -67,6 +68,9 @@ def edit_msg(token, chat_id, message_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "HTML"}
     if reply_markup: payload["reply_markup"] = reply_markup
     return tg_api(token, "editMessageText", payload, timeout=10)
+
+def delete_msg(token, chat_id, msg_id):
+    return tg_api(token, "deleteMessage", {"chat_id": chat_id, "message_id": msg_id}, timeout=5)
 
 def answer_callback(token, cb_id, text=None):
     payload = {"callback_query_id": cb_id}
@@ -238,7 +242,9 @@ def get_clients_screen():
 
     if not clients:
         text = "👥 <b>Подключенные устройства</b>\n\nАктивные клиенты не обнаружены."
-        kb = {"inline_keyboard": [[{"text": "◀️ В главное меню", "callback_data": "home"}]]}
+        kb = {"inline_keyboard": [
+            [{"text": "🗑 Закрыть", "callback_data": "close_msg"}, {"text": "◀️ В главное меню", "callback_data": "home"}]
+        ]}
     else:
         wifi_info = get_wifi_stations()
         blocked = get_blocked_macs()
@@ -276,7 +282,7 @@ def get_clients_screen():
             + "\n\n".join(lines) +
             "\n\n<i>Выберите устройство для управления доступом:</i>"
         )
-        keyboard.append([{"text": "🔄 Обновить список", "callback_data": "clients"}])
+        keyboard.append([{"text": "🔄 Обновить список", "callback_data": "clients"}, {"text": "🗑 Закрыть", "callback_data": "close_msg"}])
         keyboard.append([{"text": "◀️ В главное меню", "callback_data": "home"}])
         kb = {"inline_keyboard": keyboard}
 
@@ -429,7 +435,7 @@ def get_system_metrics():
     )
     kb = {
         "inline_keyboard": [
-            [{"text": "🔄 Обновить показатели", "callback_data": "sysinfo"}],
+            [{"text": "🔄 Обновить показатели", "callback_data": "sysinfo"}, {"text": "🗑 Закрыть", "callback_data": "close_msg"}],
             [{"text": "◀️ В главное меню", "callback_data": "home"}]
         ]
     }
@@ -492,7 +498,7 @@ def get_services_status_screen():
     )
     kb = {
         "inline_keyboard": [
-            [{"text": "🔄 Перепроверить статус", "callback_data": "check_services"}],
+            [{"text": "🔄 Перепроверить статус", "callback_data": "check_services"}, {"text": "🗑 Закрыть", "callback_data": "close_msg"}],
             [{"text": "◀️ В главное меню", "callback_data": "home"}]
         ]
     }
@@ -554,6 +560,20 @@ def get_parser_menu_screen(prompt_custom_ping=False):
     per_sec = get_uci_val("per_section_config", "0") == "1"
     target_sec = get_uci_val("target_section", "main")
 
+    cron_int = get_uci_val("interval", "never")
+    ch = get_uci_val("custom_hour", "3")
+    cm = get_uci_val("custom_minute", "0").zfill(2)
+
+    cron_labels = {
+        "never": "Откл ❌",
+        "1h": "1 ч",
+        "12h": "12 ч",
+        "24h": "24 ч",
+        "custom_daily": f"В {ch}:{cm} (LuCI)",
+        "custom_every_h": f"Каждые {ch}ч (LuCI)"
+    }
+    cron_badge = cron_labels.get(cron_int, cron_int)
+
     ru_badge = "ВКЛ 🇷🇺 (Обход РФ)" if filter_ru == "1" else "ВЫКЛ 🌐 (Все узлы)"
     sec_summary = "Индивидуальный" if per_sec else f"{target_sec} ({'Замена' if update_mode == 'replace' else 'Добавление'})"
     limit_badge = "Все (∞)" if max_best == "0" else f"Топ-{max_best}"
@@ -562,6 +582,7 @@ def get_parser_menu_screen(prompt_custom_ping=False):
         "⚙️ <b>Панель управления SubParser</b>\n\n"
         f"• <b>Порог отсева:</b> <code>{threshold} ms</code>\n"
         f"• <b>Лимит серверов:</b> <code>{limit_badge}</code>\n"
+        f"• <b>Автопроверка:</b> <code>{cron_badge}</code>\n"
         f"• <b>Фильтр РФ:</b> <code>{ru_badge}</code>\n"
         f"• <b>Секции Podkop:</b> <code>{sec_summary}</code>\n"
     )
@@ -573,13 +594,15 @@ def get_parser_menu_screen(prompt_custom_ping=False):
         "inline_keyboard": [
             [
                 {"text": "150ms" + (" ✅" if threshold == "150" else ""), "callback_data": "th:150"},
-                {"text": "250ms" + (" ✅" if threshold == "250" else ""), "callback_data": "th:250"},
                 {"text": "350ms" + (" ✅" if threshold == "350" else ""), "callback_data": "th:350"},
                 {"text": "500ms" + (" ✅" if threshold == "500" else ""), "callback_data": "th:500"}
             ],
             [
                 {"text": "✏️ Свой пинг", "callback_data": "ask_custom_th"},
-                {"text": f"Лимит: {limit_badge}", "callback_data": "cycle_limit"},
+                {"text": f"Лимит: {limit_badge}", "callback_data": "cycle_limit"}
+            ],
+            [
+                {"text": f"⏰ Интервал: {cron_badge}", "callback_data": "cycle_cron"},
                 {"text": f"РФ: {'ВКЛ ✅' if filter_ru == '1' else 'ВЫКЛ ❌'}", "callback_data": "toggle_ru"}
             ],
             [
@@ -606,10 +629,11 @@ def get_log_screen():
         except Exception as e:
             log_text = f"Ошибка чтения лога: {e}"
 
-    text = f"📄 <b>Последние строки лога парсера:</b>\n\n<pre>{log_text[:3500]}</pre>"
+    safe_log = html.escape(log_text[-3000:])
+    text = f"📄 <b>Последние строки лога парсера:</b>\n\n<pre>{safe_log}</pre>"
     kb = {
         "inline_keyboard": [
-            [{"text": "🔄 Обновить лог", "callback_data": "view_log"}],
+            [{"text": "🔄 Обновить лог", "callback_data": "view_log"}, {"text": "🗑 Закрыть", "callback_data": "close_msg"}],
             [{"text": "◀️ К меню парсера", "callback_data": "parser_menu"}]
         ]
     }
@@ -683,22 +707,24 @@ def get_status_screen():
         [{"text": "📜 Лог системы (logread)", "callback_data": "log_sys"}],
         [{"text": "🖨 Лог ядра (dmesg)", "callback_data": "log_dmesg"}],
         [{"text": "🔄 Обновить статус", "callback_data": "status"}, {"text": "♻️ Рестарт Podkop", "callback_data": "restart"}],
-        [{"text": "◀️ В главное меню", "callback_data": "home"}]
+        [{"text": "🗑 Закрыть", "callback_data": "close_msg"}, {"text": "◀️ В главное меню", "callback_data": "home"}]
     ]}
     return text, kb
 
 def get_logread_screen():
     out = "Лог пуст."
     try:
-        res = subprocess.check_output(["logread"], text=True, stderr=subprocess.DEVNULL)
-        lines = res.strip().splitlines()
-        out = "\n".join(lines[-30:]) if lines else "Лог пуст."
+        res = subprocess.run(["logread", "-l", "30"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        raw_text = res.stdout if res.stdout else subprocess.run(["logread"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout
+        lines = raw_text.strip().splitlines()
+        out = "\n".join(lines[-25:]) if lines else "Лог пуст."
     except Exception as e:
         out = f"Ошибка чтения logread: {e}"
 
-    text = f"📜 <b>Системный лог (последние 30 строк):</b>\n\n<pre>{out[:3500]}</pre>"
+    safe_out = html.escape(out[-3000:])
+    text = f"📜 <b>Системный лог (последние 25 строк):</b>\n\n<pre>{safe_out}</pre>"
     kb = {"inline_keyboard": [
-        [{"text": "🔄 Обновить logread", "callback_data": "log_sys"}],
+        [{"text": "🔄 Обновить logread", "callback_data": "log_sys"}, {"text": "🗑 Закрыть", "callback_data": "close_msg"}],
         [{"text": "◀️ Назад к статусу", "callback_data": "status"}]
     ]}
     return text, kb
@@ -706,15 +732,16 @@ def get_logread_screen():
 def get_dmesg_screen():
     out = "Лог пуст."
     try:
-        res = subprocess.check_output(["dmesg"], text=True, stderr=subprocess.DEVNULL)
-        lines = res.strip().splitlines()
+        res = subprocess.run(["dmesg"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        lines = res.stdout.strip().splitlines()
         out = "\n".join(lines[-20:]) if lines else "Лог пуст."
     except Exception as e:
         out = f"Ошибка чтения dmesg: {e}"
 
-    text = f"🖨 <b>Лог ядра dmesg (последние 20 строк):</b>\n\n<pre>{out[:3500]}</pre>"
+    safe_out = html.escape(out[-3000:])
+    text = f"🖨 <b>Лог ядра dmesg (последние 20 строк):</b>\n\n<pre>{safe_out}</pre>"
     kb = {"inline_keyboard": [
-        [{"text": "🔄 Обновить dmesg", "callback_data": "log_dmesg"}],
+        [{"text": "🔄 Обновить dmesg", "callback_data": "log_dmesg"}, {"text": "🗑 Закрыть", "callback_data": "close_msg"}],
         [{"text": "◀️ Назад к статусу", "callback_data": "status"}]
     ]}
     return text, kb
@@ -774,7 +801,6 @@ def batch_ping_nodes(links, section="main"):
     results = {}
     test_url = urllib.parse.quote(TEST_URL_GLOBAL, safe="")
     
-    # Опрос группы delay ядра sing-box
     try:
         group_tag = f"{section}-urltest-out"
         enc_group = urllib.parse.quote(group_tag)
@@ -817,7 +843,7 @@ def batch_ping_nodes(links, section="main"):
 def run_parser_process(mode_override=None):
     ps_check = subprocess.run(["pgrep", "-f", "subparser.py"], stdout=subprocess.PIPE, text=True)
     if ps_check.stdout.strip():
-        return False, "⚠️️ Парсинг уже выполняется в данный момент."
+        return False, "⚠ Парсинг уже выполняется в данный момент."
 
     if mode_override:
         set_uci_val("update_mode", mode_override)
@@ -888,7 +914,9 @@ def main():
                         wait_m = send_msg(token, user_id, "⏳ <i>Анализирую маршрут и доступность узла...</i>")
                         wait_id = wait_m.get("result", {}).get("message_id") if wait_m else None
                         rep = analyze_custom_url(raw_text)
-                        kb_back = {"inline_keyboard": [[{"text": "◀️ В главное меню", "callback_data": "home"}]]}
+                        kb_back = {"inline_keyboard": [
+                            [{"text": "🗑 Закрыть", "callback_data": "close_msg"}, {"text": "◀️ В главное меню", "callback_data": "home"}]
+                        ]}
                         if wait_id:
                             edit_msg(token, user_id, wait_id, rep, kb_back)
                         else:
@@ -906,7 +934,12 @@ def main():
                     msg_id = msg_obj.get("message_id")
                     chat_id = msg_obj.get("chat", {}).get("id")
 
-                    if data == "home":
+                    if data == "close_msg":
+                        answer_callback(token, cb_id, "Окно закрыто")
+                        delete_msg(token, chat_id, msg_id)
+                        continue
+
+                    elif data == "home":
                         set_user_state({})
                         answer_callback(token, cb_id)
                         t, kb = get_main_screen()
@@ -993,6 +1026,30 @@ def main():
                         set_uci_val("max_best_nodes", new_lim)
                         badge_txt = "Все" if new_lim == "0" else f"Топ-{new_lim}"
                         answer_callback(token, cb_id, f"Лимит узлов: {badge_txt}")
+                        t, kb = get_parser_menu_screen()
+                        edit_msg(token, chat_id, msg_id, t, kb)
+
+                    elif data == "cycle_cron":
+                        cur_cron = get_uci_val("interval", "never")
+                        cron_seq = ["never", "1h", "12h", "24h"]
+                        try:
+                            idx = cron_seq.index(cur_cron)
+                            next_cron = cron_seq[(idx + 1) % len(cron_seq)]
+                        except ValueError:
+                            next_cron = "never"
+
+                        set_uci_val("interval", next_cron)
+                        # Синхронизируем crontab через штатный init-скрипт
+                        subprocess.run(["/etc/init.d/subparser", "restart"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                        
+                        labels_map = {
+                            "never": "Автопроверка отключена",
+                            "1h": "Каждый 1 час",
+                            "12h": "Каждые 12 часов",
+                            "24h": "Раз в 24 часа"
+                        }
+                        badge_ans = labels_map.get(next_cron, next_cron)
+                        answer_callback(token, cb_id, f"Расписание: {badge_ans}")
                         t, kb = get_parser_menu_screen()
                         edit_msg(token, chat_id, msg_id, t, kb)
 
@@ -1096,7 +1153,6 @@ def main():
                         edit_msg(token, chat_id, msg_id, text_pending, kb_pending)
                         subprocess.Popen(["/etc/init.d/podkop", "restart"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-                    # Секции и серверы
                     elif data == "servers":
                         answer_callback(token, cb_id)
                         all_secs = get_all_podkop_sections()
