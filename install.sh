@@ -37,7 +37,7 @@ mkdir -p /etc/config /etc/init.d /usr/bin /usr/share/luci/menu.d /usr/share/rpcd
 if [ ! -f /etc/config/subparser ]; then
     cp -f "${SRC_PATH}/etc/config/subparser" /etc/config/subparser
 else
-    # Если конфиг уже был — дописываем только отсутствующие новые параметры
+    # Сохраняем существующие учетные данные и ссылки, дописывая только новые опции
     set_default_uci() {
         local opt="$1"
         local val="$2"
@@ -87,10 +87,14 @@ if [ -n "$REMOTE_SHA" ]; then
 fi
 
 /etc/init.d/subparser enable
-/etc/init.d/subparser start
-
 /etc/init.d/subparser-bot enable
-/etc/init.d/subparser-bot start
+
+# Запускаем службы только если сервис активирован в конфиге
+EN=$(uci -q get subparser.settings.enabled)
+if [ "$EN" = "1" ]; then
+    /etc/init.d/subparser start
+    /etc/init.d/subparser-bot start
+fi
 
 echo "=== [6/6] Обновление кэша LuCI ==="
 rm -rf /tmp/luci-indexcache /tmp/luci-modulecache

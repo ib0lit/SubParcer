@@ -10,7 +10,7 @@ echo "=== [1/5] Остановка и отключение служб ==="
 
 killall -9 subparser.py subparser-bot.py subparser-watchdog.sh >/dev/null 2>&1 || true
 
-# Очистка созданной ботом таблицы nftables
+# Очистка таблицы блокировок bot_block в nftables
 nft delete table inet bot_block >/dev/null 2>&1 || true
 
 echo "=== [2/5] Удаление задач планировщика (cron) ==="
@@ -42,5 +42,5 @@ rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
 echo ""
 echo "=========================================================="
 echo " [OK] SubParser полностью удален с маршрутизатора!"
-echo " Меню LuCI, таблицы файрвола и процессы очищены."
+echo " Меню LuCI, таблицы файрвола и фоновые процессы очищены."
 echo "=========================================================="
