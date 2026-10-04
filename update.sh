@@ -39,6 +39,8 @@ curl -sL "https://github.com/${REPO_USER}/${REPO_NAME}/archive/refs/heads/${BRAN
 SRC_PATH="${TMP_DIR}/${REPO_NAME}-${BRANCH}/root"
 
 echo "=== [3/4] Применение обновлений и миграция настроек ==="
+mkdir -p /etc/hotplug.d/uci /usr/bin /etc/init.d /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/view
+
 cp -f "${SRC_PATH}/usr/bin/"* /usr/bin/
 cp -f "${SRC_PATH}/etc/init.d/"* /etc/init.d/
 cp -f "${SRC_PATH}/usr/share/luci/menu.d/"* /usr/share/luci/menu.d/
@@ -67,12 +69,10 @@ set_default_uci "per_section_config" "0"
 set_default_uci "update_mode" "replace"
 set_default_uci "sec_mode_main" "replace"
 
-# Если target_section пустой, добавляем main
 if [ -z "$(uci -q get subparser.settings.target_section)" ]; then
     uci -q add_list subparser.settings.target_section='main'
 fi
 
-# Удаляем устаревший параметр минут, если он остался от старой версии
 uci -q delete subparser.settings.custom_interval_min 2>/dev/null || true
 uci commit subparser
 
@@ -82,7 +82,14 @@ fi
 
 echo "=== [4/4] Перезапуск служб и очистка кэша LuCI ==="
 /etc/init.d/subparser restart >/dev/null 2>&1 || /etc/init.d/subparser start
-/etc/init.d/subparser-bot restart >/dev/null 2>&1 || /etc/init.d/subparser-bot start
+
+# Бот перезапускается только если сервис включен
+EN=$(uci -q get subparser.settings.enabled)
+if [ "$EN" = "1" ]; then
+    /etc/init.d/subparser-bot restart >/dev/null 2>&1 || /etc/init.d/subparser-bot start
+else
+    /etc/init.d/subparser-bot stop >/dev/null 2>&1 || true
+fi
 
 rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
 /etc/init.d/rpcd reload >/dev/null 2>&1 || true
