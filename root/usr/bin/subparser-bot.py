@@ -1008,7 +1008,6 @@ def main():
                         ok, text_sync = run_parser_process()
                         answer_callback(token, cb_id, "Запуск парсера...")
                         kb_sync = {"inline_keyboard": [
-                            [{"text": "📊 Статус выполнения", "callback_data": "status"}],
                             [{"text": "◀️ Меню парсера", "callback_data": "parser_menu"}]
                         ]}
                         edit_msg(token, chat_id, msg_id, f"▶️ <b>Синхронизация по текущей конфигурации</b>\n\n{text_sync}", kb_sync)
