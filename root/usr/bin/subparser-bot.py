@@ -18,6 +18,7 @@ SINGBOX_BIN = "/usr/bin/sing-box"
 LOG_FILE = "/tmp/subparser_sync.log"
 BLOCKED_FILE = "/tmp/bot_blocked_macs.json"
 STATE_FILE = "/tmp/subparser_bot_state.json"
+CACHED_DELAYS = {}
 TEST_URL_GLOBAL = "https://www.gstatic.com/generate_204"
 
 SSL_CTX = ssl.create_default_context()
@@ -769,23 +770,161 @@ def get_sections_selector_screen():
     text = "📋 <b>Серверы Podkop: выбор секции</b>\n\n" + "\n".join(lines) + "\n\n<i>Выберите секцию для просмотра серверов:</i>"
     return text, {"inline_keyboard": keyboard}
 
-def get_servers_screen(delays_map=None, section="main"):
+def get_servers_screen(delays_map=None, section="main", page=0):
+    global CACHED_DELAYS
     links = get_podkop_links(section)
     all_secs = get_all_podkop_sections()
-    back_btn = {"text": "◀️ К выбору секции", "callback_data": "servers"} if len(all_secs) > 1 else {"text": "◀️ В главное меню", "callback_data": "home"}
-
+    back_btn = {"text": "◀️ Назад", "callback_data": "servers"} if len(all_secs) > 1 else {"text": "◀️ Назад", "callback_data": "home"}
+    
     if not links:
-        return f"📋 В секции <b>{section}</b> сейчас нет активных серверов.", {"inline_keyboard": [[back_btn]]}
+        return f"Секция <b>{section}</b> пуста.", {"inline_keyboard": [[back_btn]]}
+    
+    if delays_map is not None:
+        CACHED_DELAYS[section] = delays_map
+    else:
+        delays_map = CACHED_DELAYS.get(section, {})
 
+    active_manual_tag, is_auto = get_section_routing_state(section)
+
+    page_size = 10
+    total_nodes = len(links)
+    total_pages = (total_nodes + page_size - 1) // page_size
+    if page < 0: page = 0
+    elif page >= total_pages: page = total_pages - 1
+    
+    start_idx = page * page_size
+    end_idx = min(start_idx + page_size, total_nodes)
+    page_links = links[start_idx:end_idx]
+    
     keyboard = []
-    for i, link in enumerate(links):
+    for i, link in enumerate(page_links, start=start_idx):
+        tag_cur = f"{section}-{i+1}-out"
+        is_active = (not is_auto and tag_cur == active_manual_tag)
         name = get_node_name(link, i)
-        prefix = f"[{delays_map[i]} ms]" if (delays_map and delays_map.get(i, -1) > 0) else (f"[DEAD]" if delays_map else f"#{i+1}")
-        keyboard.append([{"text": f"{prefix} {name[:24]}", "callback_data": f"sel:{section}:{i}"}])
-
-    keyboard.append([{"text": "⚡ Замерить пинг всех узлов", "callback_data": f"ping_sec:{section}"}])
+        d = delays_map.get(i, -1) if delays_map else -1
+        if d > 0:
+            ico = "🟢" if d < 180 else ("🟡" if d < 350 else "🔴")
+            prefix = f"{ico} [{d}ms]"
+        elif delays_map and i in delays_map:
+            prefix = "❌ [DEAD]"
+        else:
+            prefix = f"#{i+1}"
+        
+        btn_mark = "⚡ " if is_active else ""
+        keyboard.append([{"text": f"{btn_mark}{prefix} {name[:20]}", "callback_data": f"sel:{section}:{i}:{page}"}])
+    
+    nav_row = []
+    if page > 0:
+        nav_row.append({"text": "⬅️️", "callback_data": f"srv_pg:{section}:{page-1}"})
+    nav_row.append({"text": f"📄 {page+1}/{total_pages}", "callback_data": "noop"})
+    if page < total_pages - 1:
+        nav_row.append({"text": "➡️", "callback_data": f"srv_pg:{section}:{page+1}"})
+    keyboard.append(nav_row)
+    
+    auto_label = "✅ Режим: Авто (URL-Test)" if is_auto else "🔄 Включить Авто (URL-Test)"
+    keyboard.append([{"text": auto_label, "callback_data": f"auto_mode:{section}:{page}"}])
+    keyboard.append([{"text": "⚡ Обновить пинг", "callback_data": f"ping_sec:{section}:{page}"}])
     keyboard.append([back_btn])
-    return f"📋 <b>Серверы Podkop [{section}]</b> ({len(links)} шт.):\n<i>Выберите узел для удаления или обновите пинг:</i>", {"inline_keyboard": keyboard}
+    return f"🌐 <b>Узлы Podkop [{section}]</b> ({total_nodes} шт., стр. {page+1}/{total_pages}):\n<i>Нажмите для управления:</i>", {"inline_keyboard": keyboard}
+
+def get_section_routing_state(section="main"):
+    """
+    Возвращает (active_manual_tag, is_auto)
+    active_manual_tag: имя конкретного узла, если выбран вручную, иначе ""
+    is_auto: True, если селектор направлен на urltest-out
+    """
+    try:
+        req = urllib.request.Request("http://192.168.1.1:9090/proxies")
+        with urllib.request.urlopen(req, timeout=0.8, context=SSL_CTX) as resp:
+            proxies = json.loads(resp.read().decode()).get("proxies", {})
+            
+            # 1. Ищем родительский селектор секции (тип Selector)
+            # Приоритет: f"{section}-out", затем точное совпадение с section
+            selector_data = proxies.get(f"{section}-out") or proxies.get(section)
+            
+            # Если по точному имени нет, ищем любой селектор, содержащий имя секции
+            if not selector_data or selector_data.get("type", "").lower() != "selector":
+                for k, v in proxies.items():
+                    if section in k and v.get("type", "").lower() == "selector":
+                        selector_data = v
+                        break
+            
+            if selector_data:
+                now_val = selector_data.get("now", "")
+                if "urltest" in now_val.lower():
+                    return "", True
+                else:
+                    return now_val, False
+    except Exception:
+        pass
+    return "", True
+
+def switch_active_node(section, index):
+    tag = f"{section}-{index+1}-out"
+    selector_name = f"{section}-out"
+    
+    # 1. Проверяем наличие селектора
+    try:
+        req = urllib.request.Request("http://192.168.1.1:9090/proxies")
+        with urllib.request.urlopen(req, timeout=0.8, context=SSL_CTX) as resp:
+            proxies = json.loads(resp.read().decode()).get("proxies", {})
+            if selector_name not in proxies:
+                for k, v in proxies.items():
+                    if section in k and v.get("type", "").lower() == "selector":
+                        selector_name = k
+                        break
+    except Exception:
+        pass
+
+    enc_group = urllib.parse.quote(selector_name)
+    url = f"http://192.168.1.1:9090/proxies/{enc_group}"
+    payload = json.dumps({"name": tag}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, method="PUT", headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=1.2, context=SSL_CTX) as resp:
+            if resp.status in (200, 204):
+                return True, tag
+    except Exception:
+        pass
+    return False, tag
+
+def reset_to_auto_urltest(section="main"):
+    target_urltest = f"{section}-urltest-out"
+    selector_name = f"{section}-out"
+    
+    try:
+        req = urllib.request.Request("http://192.168.1.1:9090/proxies")
+        with urllib.request.urlopen(req, timeout=0.8, context=SSL_CTX) as resp:
+            proxies = json.loads(resp.read().decode()).get("proxies", {})
+            if selector_name not in proxies:
+                for k, v in proxies.items():
+                    if section in k and v.get("type", "").lower() == "selector":
+                        selector_name = k
+                        # проверяем имя группы urltest среди вариантов
+                        for cand in v.get("all", []):
+                            if "urltest" in cand.lower():
+                                target_urltest = cand
+                                break
+                        break
+            else:
+                for cand in proxies[selector_name].get("all", []):
+                    if "urltest" in cand.lower():
+                        target_urltest = cand
+                        break
+    except Exception:
+        pass
+
+    enc_group = urllib.parse.quote(selector_name)
+    url = f"http://192.168.1.1:9090/proxies/{enc_group}"
+    payload = json.dumps({"name": target_urltest}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, method="PUT", headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=1.2, context=SSL_CTX) as resp:
+            if resp.status in (200, 204):
+                return True
+    except Exception:
+        pass
+    return False
 
 def delete_node(index, section="main"):
     links = get_podkop_links(section)
@@ -800,43 +939,33 @@ def delete_node(index, section="main"):
 def batch_ping_nodes(links, section="main"):
     results = {}
     test_url = urllib.parse.quote(TEST_URL_GLOBAL, safe="")
-    
     try:
-        group_tag = f"{section}-urltest-out"
-        enc_group = urllib.parse.quote(group_tag)
-        group_url = f"http://192.168.1.1:9090/group/{enc_group}/delay?url={test_url}&timeout=3000"
-        with urllib.request.urlopen(group_url, timeout=4.0, context=SSL_CTX) as grp_resp:
-            g_data = json.loads(grp_resp.read().decode())
-            for i, l in enumerate(links):
-                tag = f"{section}-{i+1}-out"
-                if tag in g_data and g_data[tag] > 0:
-                    results[i] = g_data[tag]
+        group_tag = urllib.parse.quote(f"{section}-urltest-out")
+        url = f"http://192.168.1.1:9090/group/{group_tag}/delay?url={test_url}&timeout=2500"
+        with urllib.request.urlopen(url, timeout=3.0, context=SSL_CTX) as resp:
+            data = json.loads(resp.read().decode())
+            for i in range(len(links)):
+                t = f"{section}-{i+1}-out"
+                if t in data and data[t] > 0:
+                    results[i] = data[t]
     except Exception:
         pass
 
-    try:
-        req = urllib.request.Request("http://192.168.1.1:9090/proxies")
-        with urllib.request.urlopen(req, timeout=3, context=SSL_CTX) as r:
-            proxies_data = json.loads(r.read().decode()).get("proxies", {})
-    except Exception:
-        proxies_data = {}
-
-    for i, link in enumerate(links):
-        if i in results and results[i] > 0:
-            continue
-        name = get_node_name(link, i)
-        val = -1
-        if name in proxies_data:
-            enc_name = urllib.parse.quote(name)
-            probe_url = f"http://192.168.1.1:9090/proxies/{enc_name}/delay?url={test_url}&timeout=3000"
+    missing = [i for i in range(len(links)) if i not in results]
+    if missing:
+        def probe_node(idx):
+            t = urllib.parse.quote(f"{section}-{idx+1}-out")
+            u = f"http://192.168.1.1:9090/proxies/{t}/delay?url={test_url}&timeout=2500"
             try:
-                with urllib.request.urlopen(probe_url, timeout=3.5, context=SSL_CTX) as pr:
-                    res = json.loads(pr.read().decode())
-                    val = int(res.get("delay", -1))
+                with urllib.request.urlopen(u, timeout=3.0, context=SSL_CTX) as r:
+                    d = json.loads(r.read().decode()).get("delay", -1)
+                    return idx, d
             except Exception:
-                hist = proxies_data[name].get("history", [])
-                if hist and hist[-1].get("delay", 0) > 0: val = hist[-1]["delay"]
-        results[i] = val
+                return idx, -1
+
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            for idx, d in pool.map(probe_node, missing):
+                results[idx] = d
 
     return results
 
@@ -1161,59 +1290,165 @@ def main():
                         else:
                             t, kb = get_sections_selector_screen()
                         edit_msg(token, chat_id, msg_id, t, kb)
+                        continue
 
-                    elif data.startswith("sec_view:"):
-                        sec_name = data.split("sec_view:")[1]
+                    elif data.startswith("srv_pg:"):
                         answer_callback(token, cb_id)
-                        t, kb = get_servers_screen(section=sec_name)
+                        p = data.split(":")
+                        sec_name = p[1]
+                        pg = int(p[2]) if len(p) > 2 else 0
+                        t, kb = get_servers_screen(section=sec_name, page=pg)
                         edit_msg(token, chat_id, msg_id, t, kb)
+                        continue
 
                     elif data.startswith("ping_sec:"):
-                        sec_name = data.split("ping_sec:")[1]
-                        answer_callback(token, cb_id, "Замеряю пинг...")
-                        edit_msg(token, chat_id, msg_id, f"⏳ <b>Замеряю задержку узлов секции [{sec_name}]...</b>")
+                        answer_callback(token, cb_id, "Опрашиваю ноды...")
+                        p = data.split(":")
+                        sec_name = p[1]
+                        pg = int(p[2]) if len(p) > 2 else 0
                         links = get_podkop_links(sec_name)
                         delays = batch_ping_nodes(links, section=sec_name)
-                        t, kb = get_servers_screen(delays_map=delays, section=sec_name)
+                        t, kb = get_servers_screen(delays_map=delays, section=sec_name, page=pg)
                         edit_msg(token, chat_id, msg_id, t, kb)
+                        continue
+
+                    elif data == "noop":
+                        answer_callback(token, cb_id)
+                        continue
+
+                    elif data.startswith("sec_view:"):
+                        answer_callback(token, cb_id)
+                        sec_name = data.split("sec_view:")[1]
+                        t, kb = get_servers_screen(section=sec_name, page=0)
+                        edit_msg(token, chat_id, msg_id, t, kb)
+                        continue
+
+                    elif data.startswith("srv_pg:"):
+                        answer_callback(token, cb_id)
+                        p = data.split(":")
+                        sec_name = p[1]
+                        pg = int(p[2]) if len(p) > 2 else 0
+                        t, kb = get_servers_screen(section=sec_name, page=pg)
+                        edit_msg(token, chat_id, msg_id, t, kb)
+                        continue
+
+                    elif data.startswith("ping_sec:"):
+                        answer_callback(token, cb_id, "Опрашиваю ноды...")
+                        p = data.split(":")
+                        sec_name = p[1]
+                        pg = int(p[2]) if len(p) > 2 else 0
+                        links = get_podkop_links(sec_name)
+                        delays = batch_ping_nodes(links, section=sec_name)
+                        t, kb = get_servers_screen(delays_map=delays, section=sec_name, page=pg)
+                        edit_msg(token, chat_id, msg_id, t, kb)
+                        continue
+
+                    elif data == "noop":
+                        answer_callback(token, cb_id)
+                        continue
+
+                    elif data.startswith("auto_mode:"):
+                        answer_callback(token, cb_id, "Возврат в авто-режим...")
+                        p = data.split(":")
+                        sec_name = p[1] if len(p) > 1 else "main"
+                        pg = int(p[2]) if len(p) > 2 else 0
+                        reset_to_auto_urltest(sec_name)
+                        t, kb = get_servers_screen(section=sec_name, page=pg)
+                        edit_msg(token, chat_id, msg_id, t, kb)
+                        continue
 
                     elif data.startswith("sel:"):
-                        parts = data.split(":")
-                        if len(parts) == 3:
-                            sec_name, idx = parts[1], int(parts[2])
-                        else:
-                            sec_name, idx = "main", int(parts[1])
+                        answer_callback(token, cb_id)
+                        p = data.split(":")
+                        sec_name = p[1] if len(p) > 1 else "main"
+                        try:
+                            idx = int(p[2])
+                        except Exception:
+                            idx = 0
+                        pg = int(p[3]) if len(p) > 3 else (idx // 10)
 
                         links = get_podkop_links(sec_name)
-                        if idx >= len(links):
-                            answer_callback(token, cb_id, "Узел уже отсутствует.")
-                            t, kb = get_servers_screen(section=sec_name)
+                        if idx < 0 or idx >= len(links):
+                            t, kb = get_servers_screen(section=sec_name, page=pg)
                             edit_msg(token, chat_id, msg_id, t, kb)
                             continue
 
                         name = get_node_name(links[idx], idx)
                         proto = urllib.parse.urlsplit(links[idx]).scheme.upper()
-                        card = f"🌐 <b>Сервер #{idx+1} [секция {sec_name}]</b>\n\n• <b>Имя:</b> <code>{name}</code>\n• <b>Протокол:</b> <code>{proto}</code>\n\nНажмите кнопку для удаления сервера из Podkop:"
+                        target_tag = f"{sec_name}-{idx+1}-out"
+                        active_manual_tag, is_auto = get_section_routing_state(sec_name)
+                        is_active = (not is_auto and target_tag == active_manual_tag)
+
+                        status_badge = "⚡ <b>АКТИВЕН В ДАННЫЙ МОМЕНТ (Вручную)</b>" if is_active else ("🤖 <b>Автовыбор (URL-Test)</b>" if is_auto else "💤 <b>В резерве</b>")
+
+                        card = (
+                            f"📌 <b>Узел #{idx+1} [Секция {sec_name}]</b>\n\n"
+                            f"🏷 <b>Имя:</b> <code>{name}</code>\n"
+                            f"⚡ <b>Протокол:</b> <code>{proto}</code>\n"
+                            f"🏷 <b>Тег:</b> <code>{target_tag}</code>\n"
+                            f"Статус: {status_badge}\n\n"
+                            "Действие:"
+                        )
+
+                        btn_row = []
+                        if not is_active:
+                            btn_row.append({"text": "⚡ Сделать активным", "callback_data": f"act:{sec_name}:{idx}:{pg}"})
+                        else:
+                            btn_row.append({"text": "🔄 Сбросить на Авто (URL-Test)", "callback_data": f"auto_mode:{sec_name}:{pg}"})
+
                         kb = {"inline_keyboard": [
-                            [{"text": f"🗑 Удалить из [{sec_name}]", "callback_data": f"del:{sec_name}:{idx}"}],
-                            [{"text": "◀️ Назад к серверам", "callback_data": f"sec_view:{sec_name}"}]
+                            btn_row,
+                            [{"text": f"🗑 Удалить из [{sec_name}]", "callback_data": f"del:{sec_name}:{idx}:{pg}"}],
+                            [{"text": "◀️ Назад к списку", "callback_data": f"srv_pg:{sec_name}:{pg}"}]
                         ]}
-                        answer_callback(token, cb_id)
                         edit_msg(token, chat_id, msg_id, card, kb)
+                        continue
+
+                    elif data.startswith("act:"):
+                        answer_callback(token, cb_id, "Переключаю...")
+                        p = data.split(":")
+                        sec_name = p[1] if len(p) > 1 else "main"
+                        try:
+                            idx = int(p[2])
+                        except Exception:
+                            idx = 0
+                        pg = int(p[3]) if len(p) > 3 else (idx // 10)
+
+                        ok, actual_tag = switch_active_node(sec_name, idx)
+                        links = get_podkop_links(sec_name)
+                        name = get_node_name(links[idx], idx) if idx < len(links) else f"#{idx+1}"
+                        proto = urllib.parse.urlsplit(links[idx]).scheme.upper() if idx < len(links) else "PROXY"
+
+                        card = (
+                            f"📌 <b>Узел #{idx+1} [Секция {sec_name}]</b>\n\n"
+                            f"🏷 <b>Имя:</b> <code>{name}</code>\n"
+                            f"⚡ <b>Протокол:</b> <code>{proto}</code>\n"
+                            f"🏷 <b>Тег:</b> <code>{actual_tag}</code>\n"
+                            f"Статус: ⚡ <b>АКТИВЕН В ДАННЫЙ МОМЕНТ</b>\n\n"
+                            "✅ <i>Трафик зафиксирован через этот сервер.</i>"
+                        )
+                        kb = {"inline_keyboard": [
+                            [{"text": "🔄 Сбросить на Авто (URL-Test)", "callback_data": f"auto_mode:{sec_name}:{pg}"}],
+                            [{"text": f"🗑 Удалить из [{sec_name}]", "callback_data": f"del:{sec_name}:{idx}:{pg}"}],
+                            [{"text": "◀️ Назад к списку", "callback_data": f"srv_pg:{sec_name}:{pg}"}]
+                        ]}
+                        edit_msg(token, chat_id, msg_id, card, kb)
+                        continue
 
                     elif data.startswith("del:"):
-                        parts = data.split(":")
-                        if len(parts) == 3:
-                            sec_name, idx = parts[1], int(parts[2])
-                        else:
-                            sec_name, idx = "main", int(parts[1])
-
-                        answer_callback(token, cb_id, "Удаляю...")
+                        answer_callback(token, cb_id, "Удаление...")
+                        p = data.split(":")
+                        sec_name = p[1] if len(p) > 1 else "main"
+                        try:
+                            idx = int(p[2])
+                        except Exception:
+                            idx = 0
+                        pg = int(p[3]) if len(p) > 3 else 0
                         ok, res = delete_node(idx, section=sec_name)
-                        alert = f"🗑 Удален: <b>{res}</b>" if ok else f"⚠️ Ошибка: {res}"
-                        t, kb = get_servers_screen(section=sec_name)
+                        alert = f"🗑 Удален: <b>{res}</b>" if ok else f"❌ Ошибка: {res}"
+                        t, kb = get_servers_screen(section=sec_name, page=pg)
                         edit_msg(token, chat_id, msg_id, f"{alert}\n\n{t}", kb)
-
+                        continue
         except Exception as poll_err:
             time.sleep(2)
 
