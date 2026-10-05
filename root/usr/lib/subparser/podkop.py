@@ -39,7 +39,7 @@ def get_node_name(link, idx):
             return urllib.parse.unquote(frag)
     except Exception:
         pass
-    return f"Сервер #{idx+1}"
+    return f"Узел #{idx+1}"
 
 def get_podkop_service_status():
     pid = ""
@@ -49,7 +49,6 @@ def get_podkop_service_status():
             pid = pids[0]
     except Exception:
         pass
-
     service_ok = False
     try:
         res = subprocess.run(["/etc/init.d/podkop", "status"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -59,7 +58,7 @@ def get_podkop_service_status():
         if pid:
             service_ok = True
 
-    ram_mb = "н/д"
+    ram_mb = ""
     if pid:
         try:
             with open(f"/proc/{pid}/status", "r") as f:
@@ -81,7 +80,6 @@ def get_podkop_service_status():
                     break
     except Exception:
         pass
-
     return service_ok, pid, ram_mb, mode_str
 
 def get_section_routing_state(section="main"):
@@ -177,50 +175,72 @@ def delete_node(index, section="main"):
     for l in links:
         subprocess.run(["uci", "add_list", f"podkop.{section}.urltest_proxy_links={l}"], check=False)
     subprocess.run(["uci", "commit", "podkop"], check=False)
-    subprocess.Popen(["/etc/init.d/podkop", "restart"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen("nohup sh -c 'sleep 2 && /etc/init.d/podkop restart' >/dev/null 2>&1 &", shell=True)
     return True, get_node_name(removed, index)
+
+def delete_nodes_batch(indices, section="main"):
+    links = get_podkop_links(section)
+    if not links or not indices:
+        return False, 0
+    del_set = set(indices)
+    new_links = [link for i, link in enumerate(links) if i not in del_set]
+    removed_count = len(links) - len(new_links)
+    
+    subprocess.run(["uci", "-q", "delete", f"podkop.{section}.urltest_proxy_links"], check=False)
+    for l in new_links:
+        subprocess.run(["uci", "add_list", f"podkop.{section}.urltest_proxy_links={l}"], check=False)
+    subprocess.run(["uci", "commit", "podkop"], check=False)
+    return True, removed_count
 
 def batch_ping_nodes(links, section="main"):
     results = {}
+    if not links:
+        return results
+
+    api_base = "http://192.168.1.1:9090"
     test_url = urllib.parse.quote(TEST_URL_GLOBAL, safe="")
+
+    # 1. Попытка забрать накопленные данные из истории ядра
     try:
-        group_tag = urllib.parse.quote(f"{section}-urltest-out")
-        url = f"http://192.168.1.1:9090/group/{group_tag}/delay?url={test_url}&timeout=2500"
-        with urllib.request.urlopen(url, timeout=3.0, context=SSL_CTX) as resp:
-            data = json.loads(resp.read().decode())
+        req = urllib.request.Request(f"{api_base}/proxies", headers={"User-Agent": "SubParser"})
+        with urllib.request.urlopen(req, timeout=1.2, context=SSL_CTX) as resp:
+            data = json.loads(resp.read().decode()).get("proxies", {})
             for i in range(len(links)):
-                t = f"{section}-{i+1}-out"
-                if t in data and data[t] > 0:
-                    results[i] = data[t]
+                tag = f"{section}-{i+1}-out"
+                if tag in data:
+                    hist = data[tag].get("history", [])
+                    if hist and hist[-1].get("delay", 0) > 0:
+                        results[i] = hist[-1]["delay"]
     except Exception:
         pass
 
+    # 2. Для узлов без пинга делаем прямой быстрый замер через /delay
     missing = [i for i in range(len(links)) if i not in results]
     if missing:
         def probe_node(idx):
             t = urllib.parse.quote(f"{section}-{idx+1}-out")
-            u = f"http://192.168.1.1:9090/proxies/{t}/delay?url={test_url}&timeout=2500"
+            u = f"{api_base}/proxies/{t}/delay?url={test_url}&timeout=1500"
             try:
-                with urllib.request.urlopen(u, timeout=3.0, context=SSL_CTX) as r:
+                req_n = urllib.request.Request(u, headers={"User-Agent": "SubParser"})
+                with urllib.request.urlopen(req_n, timeout=1.8, context=SSL_CTX) as r:
                     d = json.loads(r.read().decode()).get("delay", -1)
                     return idx, d
             except Exception:
                 return idx, -1
 
-        with ThreadPoolExecutor(max_workers=10) as pool:
+        with ThreadPoolExecutor(max_workers=min(10, len(missing))) as pool:
             for idx, d in pool.map(probe_node, missing):
                 results[idx] = d
 
+    CACHED_DELAYS[section] = results
     return results
 
 def run_parser_process(mode_override=None):
     ps_check = subprocess.run(["pgrep", "-f", "subparser.py"], stdout=subprocess.PIPE, text=True)
     if ps_check.stdout.strip():
-        return False, "⚠️ Парсинг уже выполняется в данный момент."
-
+        return False, "Синхронизация уже запущена!"
     if mode_override:
         set_uci_val("update_mode", mode_override)
-
     subprocess.run(["rm", "-f", LOCK_FILE], check=False)
     subprocess.Popen(["/usr/bin/subparser.py", "--force"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return True, "⏳ <b>Парсинг подписок и замер узлов запущены!</b>\nИтоговый отчет поступит отдельным сообщением."
+    return True, "🚀 <b>Синхронизация запущена!</b>\nПроцесс выполняется в фоне."

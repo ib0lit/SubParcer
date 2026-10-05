@@ -27,59 +27,73 @@ def get_parser_menu_screen(prompt_custom_ping=False):
     max_best = get_uci_val("max_best_nodes", "0")
     filter_ru = get_uci_val("filter_ru", "1")
     cron_int = get_uci_val("interval", "never")
+    per_sec = get_uci_val("per_section_config", "0") == "1"
+    all_secs = get_all_podkop_sections()
     ch = get_uci_val("custom_hour", "3")
     cm = get_uci_val("custom_minute", "0").zfill(2)
-
     cron_labels = {
-        "never": "Откл ❌",
-        "1h": "1 ч",
-        "12h": "12 ч",
-        "24h": "24 ч",
-        "custom_daily": f"В {ch}:{cm} (LuCI)",
-        "custom_every_h": f"Каждые {ch}ч (LuCI)"
+        "never": "Отключен",
+        "1h": "1 час",
+        "12h": "12 часов",
+        "24h": "24 часа",
+        "custom_daily": f"Ежедневно в {ch}:{cm} (LuCI)",
+        "custom_every_h": f"Каждые {ch} ч. (LuCI)"
     }
     cron_badge = cron_labels.get(cron_int, cron_int)
-    ru_badge = "ВКЛ 🇷🇺 (Обход РФ)" if filter_ru == "1" else "ВЫКЛ 🌐 (Все узлы)"
-    limit_badge = "Все (∞)" if max_best == "0" else f"Топ-{max_best}"
+    ru_badge = "Вкл (фильтровать)" if filter_ru == "1" else "Выкл (сохранять)"
+    limit_badge = "Все (без лимита)" if max_best == "0" else f"Топ-{max_best}"
     subs_count = len(get_subscriptions())
-
+    if per_sec:
+        sec_parts = []
+        for s in all_secs:
+            s_en = get_uci_val(f"sec_en_{s}", "1") == "1"
+            s_mode = get_uci_val(f"sec_mode_{s}", "replace")
+            if s_en:
+                badge = "Замена" if s_mode == "replace" else "Добавление"
+                sec_parts.append(f"{s} ({badge})")
+        sections_str = ", ".join(sec_parts) if sec_parts else "Все выключены"
+    else:
+        raw_targets = get_uci_val("target_section", "main").split()
+        target_list = raw_targets if raw_targets else ["main"]
+        g_mode = get_uci_val("update_mode", "replace")
+        mode_label = "Замена" if g_mode == "replace" else "Добавление"
+        sections_str = f"{', '.join(target_list)} ({mode_label})"
     text = (
-        "⚙️ <b>Панель управления SubParser</b>\n\n"
-        f"• <b>Подписок:</b> <code>{subs_count} шт.</code>\n"
-        f"• <b>Порог отсева:</b> <code>{threshold} ms</code>\n"
-        f"• <b>Лимит серверов:</b> <code>{limit_badge}</code>\n"
-        f"• <b>Автопроверка:</b> <code>{cron_badge}</code>\n"
-        f"• <b>Фильтр РФ:</b> <code>{ru_badge}</code>\n"
+        "⚙️ <b>Параметры парсера SubParser</b>\n\n"
+        f"📋 <b>Подписок:</b> <code>{subs_count} шт.</code>\n"
+        f"🎯 <b>Секции Podkop:</b> <code>{sections_str}</code>\n"
+        f"⚡️ <b>Порог пинга:</b> <code>{threshold} ms</code>\n"
+        f"🔝 <b>Лимит узлов:</b> <code>{limit_badge}</code>\n"
+        f"⏰ <b>Расписание:</b> <code>{cron_badge}</code>\n"
+        f"🇷🇺 <b>Фильтр RU:</b> <code>{ru_badge}</code>\n"
     )
-
     if prompt_custom_ping:
-        text += "\n✍️ <b>Введите желаемый пинг в миллисекундах (например, 280) в чат:</b>"
-
+        text += "\n✏️ <b>Введите желаемый пинг (например, 280) в ответном сообщении:</b>"
     kb = {
         "inline_keyboard": [
             [
-                {"text": f"📋 Мои подписки ({subs_count})", "callback_data": "subs_list"},
-                {"text": "📁 Настройка секций", "callback_data": "bot_sections_menu"}
+                {"text": f"📋 Подписки ({subs_count})", "callback_data": "subs_list"},
+                {"text": "🎯 Секции Podkop", "callback_data": "bot_sections_menu"}
             ],
             [
-                {"text": "150ms" + (" ✅" if threshold == "150" else ""), "callback_data": "th:150"},
-                {"text": "350ms" + (" ✅" if threshold == "350" else ""), "callback_data": "th:350"},
-                {"text": "500ms" + (" ✅" if threshold == "500" else ""), "callback_data": "th:500"}
+                {"text": "150ms" + (" 🔘" if threshold == "150" else ""), "callback_data": "th:150"},
+                {"text": "350ms" + (" 🔘" if threshold == "350" else ""), "callback_data": "th:350"},
+                {"text": "500ms" + (" 🔘" if threshold == "500" else ""), "callback_data": "th:500"}
             ],
             [
-                {"text": "✏️ Свой пинг", "callback_data": "ask_custom_th"},
+                {"text": "✏️ Задать свой", "callback_data": "ask_custom_th"},
                 {"text": f"Лимит: {limit_badge}", "callback_data": "cycle_limit"}
             ],
             [
-                {"text": f"⏰ Интервал: {cron_badge}", "callback_data": "cycle_cron"},
-                {"text": f"РФ: {'ВКЛ ✅' if filter_ru == '1' else 'ВЫКЛ ❌'}", "callback_data": "toggle_ru"}
+                {"text": f"Расписание: {cron_badge}", "callback_data": "cycle_cron"},
+                {"text": f"RU: {'Фильтр' if filter_ru == '1' else 'Все'}", "callback_data": "toggle_ru"}
             ],
             [
-                {"text": "▶️ Запустить синхронизацию", "callback_data": "run_parser"}
+                {"text": "🚀 Запустить парсер сейчас", "callback_data": "run_parser"}
             ],
             [
-                {"text": "📄 Лог парсера", "callback_data": "view_log"},
-                {"text": "◀️ В главное меню", "callback_data": "home"}
+                {"text": "📜 Лог синхронизации", "callback_data": "view_log"},
+                {"text": "◀ Главное меню", "callback_data": "home"}
             ]
         ]
     }
@@ -204,19 +218,19 @@ def get_sections_menu_screen():
     keyboard.append([{"text": "◀️ Назад в меню парсера", "callback_data": "parser_menu"}])
     return f"📁 <b>Настройка секций Podkop</b>\n\n{status_text}", {"inline_keyboard": keyboard}
 
-def get_servers_screen(delays_map=None, section="main", page=0):
+def get_servers_screen(delays_map=None, section="main", page=0, delete_mode=False, selected_indices=None):
+    if selected_indices is None:
+        selected_indices = []
+    sel_set = set(selected_indices)
     links = get_podkop_links(section)
     all_secs = get_all_podkop_sections()
-    back_btn = {"text": "◀️ Назад", "callback_data": "servers"} if len(all_secs) > 1 else {"text": "◀️ Назад", "callback_data": "home"}
-
+    back_btn = {"text": "◀️ К секциям", "callback_data": "servers"} if len(all_secs) > 1 else {"text": "◀️ В меню", "callback_data": "home"}
     if not links:
-        return f"Секция <b>{section}</b> пуста.", {"inline_keyboard": [[back_btn]]}
-
+        return f"🌐 В секции <b>{section}</b> нет серверов.", {"inline_keyboard": [[back_btn]]}
     if delays_map is not None:
         CACHED_DELAYS[section] = delays_map
     else:
         delays_map = CACHED_DELAYS.get(section, {})
-
     active_manual_tag, is_auto = get_section_routing_state(section)
     page_size = 10
     total_nodes = len(links)
@@ -225,11 +239,9 @@ def get_servers_screen(delays_map=None, section="main", page=0):
         page = 0
     elif page >= total_pages:
         page = total_pages - 1
-
     start_idx = page * page_size
     end_idx = min(start_idx + page_size, total_nodes)
     page_links = links[start_idx:end_idx]
-
     keyboard = []
     for i, link in enumerate(page_links, start=start_idx):
         tag_cur = f"{section}-{i+1}-out"
@@ -243,23 +255,37 @@ def get_servers_screen(delays_map=None, section="main", page=0):
             prefix = "❌ [DEAD]"
         else:
             prefix = f"#{i+1}"
-
-        btn_mark = "⚡ " if is_active else ""
-        keyboard.append([{"text": f"{btn_mark}{prefix} {name[:20]}", "callback_data": f"sel:{section}:{i}:{page}"}])
-
+        if delete_mode:
+            cb_ico = "☑️" if i in sel_set else "◻️"
+            keyboard.append([{"text": f"{cb_ico} {prefix} {name[:20]}", "callback_data": f"tgl_del:{section}:{i}:{page}"}])
+        else:
+            btn_mark = "🔘 " if is_active else ""
+            keyboard.append([{"text": f"{btn_mark}{prefix} {name[:20]}", "callback_data": f"sel:{section}:{i}:{page}"}])
     nav_row = []
+    pg_callback_prefix = "srv_del_pg" if delete_mode else "srv_pg"
     if page > 0:
-        nav_row.append({"text": "⬅", "callback_data": f"srv_pg:{section}:{page-1}"})
+        nav_row.append({"text": "⬅️", "callback_data": f"{pg_callback_prefix}:{section}:{page-1}"})
     nav_row.append({"text": f"📄 {page+1}/{total_pages}", "callback_data": "noop"})
     if page < total_pages - 1:
-        nav_row.append({"text": "➡️", "callback_data": f"srv_pg:{section}:{page+1}"})
-    keyboard.append(nav_row)
-
-    auto_label = "✅ Режим: Авто (URL-Test)" if is_auto else "🔄 Включить Авто (URL-Test)"
-    keyboard.append([{"text": auto_label, "callback_data": f"auto_mode:{section}:{page}"}])
-    keyboard.append([{"text": "⚡ Обновить пинг", "callback_data": f"ping_sec:{section}:{page}"}])
-    keyboard.append([back_btn])
-    return f"🌐 <b>Узлы Podkop [{section}]</b> ({total_nodes} шт., стр. {page+1}/{total_pages}):\n<i>Нажмите для управления:</i>", {"inline_keyboard": keyboard}
+        nav_row.append({"text": "➡️", "callback_data": f"{pg_callback_prefix}:{section}:{page+1}"})
+    if nav_row:
+        keyboard.append(nav_row)
+    if delete_mode:
+        cnt_sel = len(sel_set)
+        keyboard.append([{"text": f"🗑 Подтвердить удаление ({cnt_sel})", "callback_data": f"apply_bdel:{section}:{page}"}])
+        keyboard.append([{"text": "❌ Выбрать все [DEAD]", "callback_data": f"sel_dead:{section}:{page}"}])
+        keyboard.append([{"text": "◀️ Отмена (выход)", "callback_data": f"exit_del_mode:{section}:{page}"}])
+        title = f"🌐 <b>Узлы Podkop [{section}] [Мультиудаление]</b> ({total_nodes} шт., стр. {page+1}/{total_pages}):\n<i>Отметьте узлы для удаления:</i>"
+    else:
+        auto_label = "✅ Режим: Авто (URL-Test)" if is_auto else "🔄 Включить Авто (URL-Test)"
+        keyboard.append([{"text": auto_label, "callback_data": f"auto_mode:{section}:{page}"}])
+        keyboard.append([
+            {"text": "⚡️ Пинг", "callback_data": f"ping_sec:{section}:{page}"},
+            {"text": "🗑 Мультиудаление", "callback_data": f"enter_del_mode:{section}:{page}"}
+        ])
+        keyboard.append([back_btn])
+        title = f"🌐 <b>Узлы Podkop [{section}]</b> ({total_nodes} шт., стр. {page+1}/{total_pages}):\n<i>Нажмите для управления:</i>"
+    return title, {"inline_keyboard": keyboard}
 
 def get_sections_selector_screen():
     all_secs = get_all_podkop_sections()

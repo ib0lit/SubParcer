@@ -22,7 +22,7 @@ from subparser.system import (
 )
 from subparser.podkop import (
     get_all_podkop_sections, get_podkop_links, get_node_name, get_section_routing_state,
-    switch_active_node, reset_to_auto_urltest, delete_node,
+    switch_active_node, reset_to_auto_urltest, delete_node, delete_nodes_batch,
     batch_ping_nodes, run_parser_process
 )
 from subparser.screens import (
@@ -462,10 +462,124 @@ def main():
                         edit_msg(token, chat_id, msg_id, t, kb)
 
                     elif data.startswith("sec_view:"):
-                        answer_callback(token, cb_id)
+                        answer_callback(token, cb_id, "Замеряю пинг...")
                         sec_name = data.split("sec_view:")[1]
-                        t, kb = get_servers_screen(section=sec_name, page=0)
+                        from subparser.podkop import CACHED_DELAYS, get_podkop_links, batch_ping_nodes
+                        delays = CACHED_DELAYS.get(sec_name)
+                        links = get_podkop_links(sec_name)
+                        if delays is None or not delays:
+                            delays = batch_ping_nodes(links, section=sec_name) if links else {}
+                        t, kb = get_servers_screen(delays_map=delays, section=sec_name, page=0)
                         edit_msg(token, chat_id, msg_id, t, kb)
+
+                    elif data.startswith("enter_del_mode:"):
+                        answer_callback(token, cb_id)
+                        p = data.split(":")
+                        sec_name = p[1]
+                        pg = int(p[2]) if len(p) > 2 else 0
+                        set_user_state({"del_batch_sel": []})
+                        from subparser.podkop import CACHED_DELAYS
+                        delays = CACHED_DELAYS.get(sec_name, {})
+                        t, kb = get_servers_screen(delays_map=delays, section=sec_name, page=pg, delete_mode=True, selected_indices=[])
+                        edit_msg(token, chat_id, msg_id, t, kb)
+
+                    elif data.startswith("tgl_del:"):
+                        answer_callback(token, cb_id)
+                        p = data.split(":")
+                        sec_name = p[1]
+                        idx = int(p[2])
+                        pg = int(p[3]) if len(p) > 3 else 0
+                        st = get_user_state()
+                        sel_set = set(st.get("del_batch_sel", []))
+                        if idx in sel_set:
+                            sel_set.remove(idx)
+                        else:
+                            sel_set.add(idx)
+                        sel_list = list(sel_set)
+                        set_user_state({"del_batch_sel": sel_list})
+                        from subparser.podkop import CACHED_DELAYS
+                        delays = CACHED_DELAYS.get(sec_name, {})
+                        t, kb = get_servers_screen(delays_map=delays, section=sec_name, page=pg, delete_mode=True, selected_indices=sel_list)
+                        edit_msg(token, chat_id, msg_id, t, kb)
+
+                    elif data.startswith("sel_dead:"):
+                        answer_callback(token, cb_id, "Выбираю [DEAD]...")
+                        p = data.split(":")
+                        sec_name = p[1]
+                        pg = int(p[2]) if len(p) > 2 else 0
+                        from subparser.podkop import CACHED_DELAYS, get_podkop_links
+                        delays = CACHED_DELAYS.get(sec_name, {})
+                        links = get_podkop_links(sec_name)
+                        st = get_user_state()
+                        sel_set = set(st.get("del_batch_sel", []))
+                        for i in range(len(links)):
+                            if delays.get(i, -1) <= 0 and i in delays:
+                                sel_set.add(i)
+                        sel_list = list(sel_set)
+                        set_user_state({"del_batch_sel": sel_list})
+                        t, kb = get_servers_screen(delays_map=delays, section=sec_name, page=pg, delete_mode=True, selected_indices=sel_list)
+                        edit_msg(token, chat_id, msg_id, t, kb)
+
+                    elif data.startswith("exit_del_mode:"):
+                        answer_callback(token, cb_id)
+                        p = data.split(":")
+                        sec_name = p[1]
+                        pg = int(p[2]) if len(p) > 2 else 0
+                        set_user_state({})
+                        from subparser.podkop import CACHED_DELAYS
+                        delays = CACHED_DELAYS.get(sec_name, {})
+                        t, kb = get_servers_screen(delays_map=delays, section=sec_name, page=pg, delete_mode=False, selected_indices=[])
+                        edit_msg(token, chat_id, msg_id, t, kb)
+
+                    elif data.startswith("srv_del_pg:"):
+                        answer_callback(token, cb_id)
+                        p = data.split(":")
+                        sec_name = p[1]
+                        pg = int(p[2])
+                        st = get_user_state()
+                        sel_list = st.get("del_batch_sel", [])
+                        from subparser.podkop import CACHED_DELAYS
+                        delays = CACHED_DELAYS.get(sec_name, {})
+                        t, kb = get_servers_screen(delays_map=delays, section=sec_name, page=pg, delete_mode=True, selected_indices=sel_list)
+                        edit_msg(token, chat_id, msg_id, t, kb)
+
+                    elif data.startswith("apply_bdel:"):
+                        answer_callback(token, cb_id, "Применяю...")
+                        p = data.split(":")
+                        sec_name = p[1]
+                        st = get_user_state()
+                        sel_list = st.get("del_batch_sel", [])
+                        set_user_state({})
+                        if not sel_list:
+                            answer_callback(token, cb_id, "Ничего не выбрано")
+                            continue
+
+                        from subparser.podkop import CACHED_DELAYS, get_podkop_links, delete_nodes_batch
+                        all_links = get_podkop_links(sec_name)
+                        sel_set = set(sel_list)
+                        cnt = len(sel_set)
+
+                        # Пересчитываем пинги ДО изменения UCI
+                        old_delays = CACHED_DELAYS.get(sec_name, {})
+                        new_delays = {}
+                        new_idx = 0
+                        for old_idx in range(len(all_links)):
+                            if old_idx not in sel_set:
+                                if old_idx in old_delays:
+                                    new_delays[new_idx] = old_delays[old_idx]
+                                new_idx += 1
+                        CACHED_DELAYS[sec_name] = new_delays
+
+                        # 1. Локально сохраняем в UCI
+                        delete_nodes_batch(sel_list, section=sec_name)
+
+                        # 2. Немедленно отдаем обновленный экран с сохраненными пингами
+                        msg_alert = f"🗑 <b>Удалено узлов: {cnt} шт.</b>\n<i>(Служба перезапускается в фоне)</i>\n\n"
+                        t, kb = get_servers_screen(delays_map=new_delays, section=sec_name, page=0, delete_mode=False, selected_indices=[])
+                        edit_msg(token, chat_id, msg_id, f"{msg_alert}{t}", kb)
+
+                        # 3. Отложенный рестарт в фоне
+                        subprocess.Popen("sh -c 'sleep 2 && /etc/init.d/podkop restart' >/dev/null 2>&1 &", shell=True)
 
                     elif data.startswith("srv_pg:"):
                         answer_callback(token, cb_id)
@@ -476,7 +590,7 @@ def main():
                         edit_msg(token, chat_id, msg_id, t, kb)
 
                     elif data.startswith("ping_sec:"):
-                        answer_callback(token, cb_id, "Опрашиваю ноды...")
+                        answer_callback(token, cb_id, "Замеряю...")
                         p = data.split(":")
                         sec_name = p[1]
                         pg = int(p[2]) if len(p) > 2 else 0
