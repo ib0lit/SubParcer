@@ -1,13 +1,12 @@
 # ⚡ SubParser for OpenWrt
 
 <p align="center">
-  <img src="https://img.shields.io/badge/OpenWrt-21.02_--_25.x-0099E5?style=for-the-badge&logo=openwrt&logoColor=white" alt="OpenWrt" />
-  <img src="https://img.shields.io/badge/Python-3.9_--_3.13-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
-  <img src="https://img.shields.io/badge/sing--box-1.8+-E34F26?style=for-the-badge" alt="sing-box" />
-  <br/>
-  <img src="https://img.shields.io/badge/Telegram_Bot-Ready-24A1DE?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram Bot" />
-  <img src="https://img.shields.io/badge/LuCI-Integrated-00D26A?style=for-the-badge" alt="LuCI" />
-  <img src="https://img.shields.io/badge/Version-v2.1.1-blueviolet?style=for-the-badge" alt="Version" />
+  <img src="https://img.shields.io/badge/OpenWrt-21.02_--_25.x-0099E5?style=flat-square&logo=openwrt&logoColor=white" alt="OpenWrt" />
+  <img src="https://img.shields.io/badge/Python-3.9_--_3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/sing--box-1.8+-E34F26?style=flat-square" alt="sing-box" />
+  <img src="https://img.shields.io/badge/Telegram_Bot-Ready-24A1DE?style=flat-square&logo=telegram&logoColor=white" alt="Telegram Bot" />
+  <img src="https://img.shields.io/badge/LuCI-Integrated-00D26A?style=flat-square" alt="LuCI" />
+  <img src="https://img.shields.io/badge/Version-v2.1.1-blueviolet?style=flat-square" alt="Version" />
 </p>
 
 > [!CAUTION]
