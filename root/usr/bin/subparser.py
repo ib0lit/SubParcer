@@ -441,7 +441,10 @@ def main():
     with open(tmp_cfg, "w") as f:
         json.dump(cfg, f, indent=2)
 
-    proc = subprocess.Popen([SINGBOX_BIN, "run", "-c", tmp_cfg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    env_sb = os.environ.copy()
+    env_sb["ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER"] = "true"
+    env_sb["ENABLE_DEPRECATED_OUTBOUND_DNS_RULE_ITEM"] = "true"
+    proc = subprocess.Popen([SINGBOX_BIN, "run", "-c", tmp_cfg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env_sb)
     time.sleep(2.5)
 
     if proc.poll() is not None:
