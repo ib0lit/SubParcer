@@ -192,7 +192,7 @@ def delete_nodes_batch(indices, section="main"):
     subprocess.run(["uci", "commit", "podkop"], check=False)
     return True, removed_count
 
-def batch_ping_nodes(links, section="main"):
+def batch_ping_nodes(links, section="main", force=False):
     results = {}
     if not links:
         return results
@@ -200,29 +200,30 @@ def batch_ping_nodes(links, section="main"):
     api_base = "http://192.168.1.1:9090"
     test_url = urllib.parse.quote(TEST_URL_GLOBAL, safe="")
 
-    # 1. Попытка забрать накопленные данные из истории ядра
-    try:
-        req = urllib.request.Request(f"{api_base}/proxies", headers={"User-Agent": "SubParser"})
-        with urllib.request.urlopen(req, timeout=1.2, context=SSL_CTX) as resp:
-            data = json.loads(resp.read().decode()).get("proxies", {})
-            for i in range(len(links)):
-                tag = f"{section}-{i+1}-out"
-                if tag in data:
-                    hist = data[tag].get("history", [])
-                    if hist and hist[-1].get("delay", 0) > 0:
-                        results[i] = hist[-1]["delay"]
-    except Exception:
-        pass
+    # 1. Если не запрошен принудительный замер — пробуем взять историю ядра
+    if not force:
+        try:
+            req = urllib.request.Request(f"{api_base}/proxies", headers={"User-Agent": "SubParser"})
+            with urllib.request.urlopen(req, timeout=1.2, context=SSL_CTX) as resp:
+                data = json.loads(resp.read().decode()).get("proxies", {})
+                for i in range(len(links)):
+                    tag = f"{section}-{i+1}-out"
+                    if tag in data:
+                        hist = data[tag].get("history", [])
+                        if hist and hist[-1].get("delay", 0) > 0:
+                            results[i] = hist[-1]["delay"]
+        except Exception:
+            pass
 
-    # 2. Для узлов без пинга делаем прямой быстрый замер через /delay
+    # 2. Опрашиваем узлы напрямую через /delay
     missing = [i for i in range(len(links)) if i not in results]
     if missing:
         def probe_node(idx):
             t = urllib.parse.quote(f"{section}-{idx+1}-out")
-            u = f"{api_base}/proxies/{t}/delay?url={test_url}&timeout=1500"
+            u = f"{api_base}/proxies/{t}/delay?url={test_url}&timeout=1800"
             try:
                 req_n = urllib.request.Request(u, headers={"User-Agent": "SubParser"})
-                with urllib.request.urlopen(req_n, timeout=1.8, context=SSL_CTX) as r:
+                with urllib.request.urlopen(req_n, timeout=2.2, context=SSL_CTX) as r:
                     d = json.loads(r.read().decode()).get("delay", -1)
                     return idx, d
             except Exception:

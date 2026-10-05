@@ -35,6 +35,44 @@ UA_MAP = {
     "curl": "curl/7.88.1"
 }
 
+PROGRESS_FILE = "/tmp/subparser_progress.json"
+
+def update_live_progress(step_title, step_desc):
+    try:
+        if not os.path.exists(PROGRESS_FILE):
+            return
+        with open(PROGRESS_FILE, "r") as pf:
+            pdata = json.load(pf)
+        token = pdata.get("token")
+        chat_id = pdata.get("chat_id")
+        msg_id = pdata.get("msg_id")
+        if not token or not chat_id or not msg_id:
+            return
+
+        url = f"https://api.telegram.org/bot{token}/editMessageText"
+        body = (
+            "▶️ <b>Синхронизация по текущей конфигурации</b>\n\n"
+            f"<b>{step_title}</b>\n"
+            f"<i>{step_desc}</i>"
+        )
+        # Кнопки принудительно скрыты: окно строго информационное
+        payload = json.dumps({
+            "chat_id": chat_id,
+            "message_id": msg_id,
+            "text": body,
+            "parse_mode": "HTML",
+            "reply_markup": {"inline_keyboard": []}
+        }).encode("utf-8")
+
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(req, timeout=3, context=ctx):
+            pass
+    except Exception:
+        pass
+
 def send_telegram_notify(text):
     try:
         token = subprocess.check_output(["uci", "-q", "get", f"{CONFIG_NAME}.settings.tg_bot_token"], text=True).strip()
@@ -42,30 +80,32 @@ def send_telegram_notify(text):
         if not token or not chat_id:
             return
 
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         data = urllib.parse.urlencode({"chat_id": chat_id, "text": text, "parse_mode": "HTML"}).encode("utf-8")
 
         print("[*] Ожидание готовности сети для отправки отчета в Telegram...")
-        time.sleep(5)
+        time.sleep(4)
 
         max_attempts = 20
-        retry_delay = 15
+        retry_delay = 10
 
         for attempt in range(1, max_attempts + 1):
             try:
                 req = urllib.request.Request(url, data=data, headers={"User-Agent": "OpenWrt-SubParser"})
-                with urllib.request.urlopen(req, timeout=6) as resp:
+                with urllib.request.urlopen(req, timeout=6, context=ctx) as resp:
                     if resp.status == 200:
                         print(f"[OK] Уведомление успешно доставлено в Telegram (попытка {attempt}/{max_attempts}).")
                         return
             except Exception as net_err:
                 if attempt < max_attempts:
-                    print(f"  [!] Нет связи с Telegram (попытка {attempt}/{max_attempts}). Повтор через {retry_delay}с...")
+                    print(f"  [!] Нет связи с Telegram ({net_err}). Повтор через {retry_delay}с...")
                     time.sleep(retry_delay)
-                else:
-                    print(f"  [!] Финальная попытка {attempt}/{max_attempts} не удалась: {net_err}")
 
-        print("[!] Превышен лимит ожидания (~5.5 минут). Уведомление не доставлено.")
+        print("[!] Превышен лимит ожидания. Уведомление не доставлено.")
     except Exception as e:
         print(f"[!] Ошибка отправки: {e}")
 
@@ -146,7 +186,7 @@ def fetch_single_sub(sub_info: dict) -> list:
     ua = UA_MAP.get(ua_key, UA_MAP["v2rayN"])
     name = sub_info.get("name", "Подписка")
 
-    print(f"[{name}] Запрос подписки через {ua_key}...")
+    update_live_progress("⏳ [1/4] Загрузка подписок...", f"Получение: {name}"); print(f"[{name}] Запрос подписки через {ua_key}...")
 
     headers = {
         "User-Agent": ua,
@@ -456,7 +496,7 @@ def main():
     results = {}
     total = len(tag_map)
     try:
-        print(f"\n[Этап 1/2] Быстрый скрининг {total} узлов...")
+        update_live_progress("🔍 [2/4] Скрининг узлов...", f"Проверка отклика {total} серверов..."); print(f"\n[Этап 1/2] Быстрый скрининг {total} узлов...")
         stage1_candidates = []
         def quick_probe(item):
             tag, link = item
@@ -483,7 +523,7 @@ def main():
 
         print(f"\nОтобрано кандидатов для теста стабильности: {len(stage1_candidates)}")
         if stage1_candidates:
-            print(f"\n[Этап 2/2] Анализ стабильности (5 замеров, медиана)...")
+            update_live_progress("📊 [3/4] Тест стабильности...", f"Анализ джиттера ({len(stage1_candidates)} канд.)..."); print(f"\n[Этап 2/2] Анализ стабильности (5 замеров, медиана)...")
             def detailed_probe(cand):
                 tag, link, _ = cand
                 delays = []
@@ -571,6 +611,8 @@ def main():
                 subprocess.run(["uci", "add_list", f"podkop.{sec}.urltest_proxy_links={link}"], check=False)
 
         subprocess.run(["uci", "commit", "podkop"], check=False)
+        update_live_progress("♻️ [4/4] Обновление Podkop...", "Запись серверов в UCI и перезапуск службы...")
+        time.sleep(1)
         subprocess.run(["/etc/init.d/podkop", "restart"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
         print(f"Podkop успешно обновлен!")
 

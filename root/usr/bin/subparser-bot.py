@@ -5,6 +5,7 @@ import time
 sys.path.insert(0, "/usr/lib")
 import html
 import subprocess
+import threading
 import urllib.parse
 
 from subparser.config import (
@@ -34,6 +35,32 @@ from subparser.screens import (
     get_status_screen, get_log_screen, get_logread_screen,
     get_dmesg_screen, get_reboot_confirm_screen
 )
+
+def watch_parser_and_restore_menu(token, chat_id, old_msg_id):
+    # Ждем пока subparser.py реально начнет работу
+    time.sleep(3)
+    # Ждем завершения работы процесса
+    while True:
+        ps = subprocess.run(["pgrep", "-f", "subparser.py"], stdout=subprocess.PIPE, text=True)
+        if not ps.stdout.strip():
+            break
+        time.sleep(2)
+
+    # Даем паузу, чтобы отчет гарантированно доставился первым
+    time.sleep(3)
+
+    # Удаляем старое окно синхронизации
+    try:
+        delete_msg(token, chat_id, old_msg_id)
+    except Exception:
+        pass
+
+    # Отправляем Главное меню новым сообщением
+    try:
+        t, kb = get_main_screen()
+        send_msg(token, chat_id, t, reply_markup=kb)
+    except Exception:
+        pass
 
 def setup_bot_commands(token):
     commands = [
@@ -361,12 +388,20 @@ def main():
                         edit_msg(token, chat_id, msg_id, t, kb)
 
                     elif data == "run_parser":
-                        ok, text_sync = run_parser_process()
                         answer_callback(token, cb_id, "Запуск парсера...")
-                        kb_sync = {"inline_keyboard": [
-                            [{"text": "◀️ Меню парсера", "callback_data": "parser_menu"}]
-                        ]}
-                        edit_msg(token, chat_id, msg_id, f"▶️ <b>Синхронизация по текущей конфигурации</b>\n\n{text_sync}", kb_sync)
+                        try:
+                            import json
+                            with open("/tmp/subparser_progress.json", "w") as pf:
+                                json.dump({"token": token, "chat_id": chat_id, "msg_id": msg_id}, pf)
+                        except Exception:
+                            pass
+
+                        ok, text_sync = run_parser_process()
+                        edit_msg(token, chat_id, msg_id, f"▶️ <b>Синхронизация по текущей конфигурации</b>\n\n{text_sync}", reply_markup={"inline_keyboard": []})
+
+                        # Запускаем фоновый поток слежения за завершением парсера
+                        th = threading.Thread(target=watch_parser_and_restore_menu, args=(token, chat_id, msg_id), daemon=True)
+                        th.start()
 
                     elif data == "sysinfo":
                         answer_callback(token, cb_id)
@@ -590,14 +625,17 @@ def main():
                         edit_msg(token, chat_id, msg_id, t, kb)
 
                     elif data.startswith("ping_sec:"):
-                        answer_callback(token, cb_id, "Замеряю...")
                         p = data.split(":")
                         sec_name = p[1]
                         pg = int(p[2]) if len(p) > 2 else 0
+                        from subparser.podkop import get_podkop_links, batch_ping_nodes
                         links = get_podkop_links(sec_name)
-                        delays = batch_ping_nodes(links, section=sec_name)
+                        # Замеряем пинги параллельно
+                        delays = batch_ping_nodes(links, section=sec_name, force=True)
                         t, kb = get_servers_screen(delays_map=delays, section=sec_name, page=pg)
                         edit_msg(token, chat_id, msg_id, t, kb)
+                        # Показываем попап ТОЛЬКО после завершения замеров и обновления экрана
+                        answer_callback(token, cb_id, "⚡️ Пинги обновлены!")
 
                     elif data == "noop":
                         answer_callback(token, cb_id)
