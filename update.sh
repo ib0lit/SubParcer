@@ -20,7 +20,7 @@ else
     if [ -f "$COMMIT_FILE" ]; then
         LOCAL_SHA=$(cat "$COMMIT_FILE" 2>/dev/null || true)
         if [ "$LOCAL_SHA" = "$REMOTE_SHA" ]; then
-            CURRENT_VER=$(cat "$VERSION_FILE" 2>/dev/null || echo "v2.x")
+            CURRENT_VER=$(cat "$VERSION_FILE" 2>/dev/null || echo "2.0.1")
             echo ""
             echo "=========================================================="
             echo " [i] Обновлений нет. Установлена актуальная версия: ${CURRENT_VER}"
@@ -51,10 +51,18 @@ cp -f "${SRC_PATH}/www/luci-static/resources/view/"* /www/luci-static/resources/
 [ -f "${SRC_PATH}/etc/subparser_version" ] && cp -f "${SRC_PATH}/etc/subparser_version" /etc/subparser_version
 [ -d "${SRC_PATH}/etc/hotplug.d/uci" ] && cp -f "${SRC_PATH}/etc/hotplug.d/uci/"* /etc/hotplug.d/uci/ 2>/dev/null || true
 
-# Удаление устаревшего ACL-дубликата, если он остался от прошлых версий
+# Удаление устаревшего ACL-дубликата
 rm -f /usr/share/rpcd/acl.d/subparser.json 2>/dev/null || true
 
 chmod +x /usr/bin/subparser* /etc/init.d/subparser*
+
+# --- Проверка и гарантированная регистрация watchdog в cron ---
+CRON_TMP="/tmp/cron_subparser_upd.tmp"
+crontab -l 2>/dev/null | grep -v "subparser-watchdog.sh" > "$CRON_TMP" || true
+echo "*/5 * * * * /usr/bin/subparser-watchdog.sh >/dev/null 2>&1" >> "$CRON_TMP"
+crontab "$CRON_TMP" 2>/dev/null || true
+rm -f "$CRON_TMP"
+/etc/init.d/cron restart >/dev/null 2>&1 || true
 
 # --- Мягкая миграция UCI-конфига ---
 set_default_uci() {
@@ -80,7 +88,6 @@ if [ -z "$(uci -q get subparser.settings.target_section)" ]; then
     uci -q add_list subparser.settings.target_section='main'
 fi
 
-# Вычищаем старые параметры, если они существовали
 uci -q delete subparser.settings.cron_interval 2>/dev/null || true
 uci -q delete subparser.settings.custom_interval_min 2>/dev/null || true
 uci commit subparser
@@ -104,7 +111,7 @@ rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
 
 rm -rf "$TMP_DIR"
 
-NEW_VER=$(cat "$VERSION_FILE" 2>/dev/null || echo "2.0.0")
+NEW_VER=$(cat "$VERSION_FILE" 2>/dev/null || echo "2.0.1")
 echo ""
 echo "=========================================================="
 echo " [OK] SubParser успешно обновлен до версии ${NEW_VER}!"

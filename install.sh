@@ -10,14 +10,27 @@ VERSION_FILE="/etc/subparser_version"
 echo "=== [1/6] Определение пакетного менеджера и зависимостей ==="
 set +e
 
+install_pkg() {
+    local pkg="$1"
+    if command -v apk >/dev/null 2>&1; then
+        apk add "$pkg" >/dev/null 2>&1 || true
+    elif command -v opkg >/dev/null 2>&1; then
+        opkg install "$pkg" >/dev/null 2>&1 || true
+    fi
+}
+
 if command -v apk >/dev/null 2>&1; then
     echo "[*] Обнаружен менеджер apk (OpenWrt 25+)"
     apk update
-    apk add python3 conntrack curl ca-certificates
+    apk add python3 curl ca-certificates
+    # Подбор conntrack утилиты для разных веток apk
+    apk add conntrack-tools >/dev/null 2>&1 || apk add conntrack >/dev/null 2>&1 || true
 elif command -v opkg >/dev/null 2>&1; then
-    echo "[*] Обнаружен менеджер opkg (OpenWrt 21-24)"
+    echo "[*] Обнаружен менеджер opkg (OpenWrt 19-24)"
     opkg update
-    opkg install python3 conntrack curl ca-bundle ca-certificates
+    opkg install python3 curl ca-certificates ca-bundle
+    # Подбор conntrack-tools для opkg
+    opkg install conntrack-tools >/dev/null 2>&1 || opkg install conntrack >/dev/null 2>&1 || true
 else
     echo "[!] Предупреждение: пакетный менеджер не найден. Пропуск шага."
 fi
@@ -71,7 +84,7 @@ cp -f "${SRC_PATH}/www/luci-static/resources/view/"* /www/luci-static/resources/
 [ -f "${SRC_PATH}/etc/subparser_version" ] && cp -f "${SRC_PATH}/etc/subparser_version" /etc/subparser_version
 [ -d "${SRC_PATH}/etc/hotplug.d/uci" ] && cp -f "${SRC_PATH}/etc/hotplug.d/uci/"* /etc/hotplug.d/uci/ 2>/dev/null || true
 
-# Удаление старого ACL-дубликата
+# Удаление устаревшего ACL-дубликата
 rm -f /usr/share/rpcd/acl.d/subparser.json 2>/dev/null || true
 
 echo "=== [4/6] Настройка прав доступа ==="
@@ -80,7 +93,7 @@ chmod +x /usr/bin/subparser* 2>/dev/null || true
 
 echo "=== [5/6] Регистрация задач и автозапуск ==="
 CRON_TMP="/tmp/cron_subparser_inst.tmp"
-crontab -l 2>/dev/null | grep -v "subparser-watchdog.sh" > "$CRON_TMP" || true
+crontab -l 2>/dev/null | grep -v "subparser" > "$CRON_TMP" || true
 echo "*/5 * * * * /usr/bin/subparser-watchdog.sh >/dev/null 2>&1" >> "$CRON_TMP"
 crontab "$CRON_TMP" 2>/dev/null || true
 rm -f "$CRON_TMP"

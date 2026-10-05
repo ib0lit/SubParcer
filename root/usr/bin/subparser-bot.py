@@ -1292,30 +1292,6 @@ def main():
                         edit_msg(token, chat_id, msg_id, t, kb)
                         continue
 
-                    elif data.startswith("srv_pg:"):
-                        answer_callback(token, cb_id)
-                        p = data.split(":")
-                        sec_name = p[1]
-                        pg = int(p[2]) if len(p) > 2 else 0
-                        t, kb = get_servers_screen(section=sec_name, page=pg)
-                        edit_msg(token, chat_id, msg_id, t, kb)
-                        continue
-
-                    elif data.startswith("ping_sec:"):
-                        answer_callback(token, cb_id, "Опрашиваю ноды...")
-                        p = data.split(":")
-                        sec_name = p[1]
-                        pg = int(p[2]) if len(p) > 2 else 0
-                        links = get_podkop_links(sec_name)
-                        delays = batch_ping_nodes(links, section=sec_name)
-                        t, kb = get_servers_screen(delays_map=delays, section=sec_name, page=pg)
-                        edit_msg(token, chat_id, msg_id, t, kb)
-                        continue
-
-                    elif data == "noop":
-                        answer_callback(token, cb_id)
-                        continue
-
                     elif data.startswith("sec_view:"):
                         answer_callback(token, cb_id)
                         sec_name = data.split("sec_view:")[1]
