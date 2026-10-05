@@ -40,8 +40,16 @@ mkdir -p "$TMP_DIR"
 curl -sL "https://github.com/${REPO_USER}/${REPO_NAME}/archive/refs/heads/${BRANCH}.tar.gz?nocache=$(date +%s)" | tar -xz -C "$TMP_DIR"
 SRC_PATH="${TMP_DIR}/${REPO_NAME}-${BRANCH}/root"
 
-echo "=== [3/4] Применение обновлений и миграция настроек ==="
-mkdir -p /etc/hotplug.d/uci /usr/bin /etc/init.d /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/view
+echo "=== [3/4] Применение обновлений и миграция структуры ==="
+# Остановка бота перед заменой файлов
+/etc/init.d/subparser-bot stop >/dev/null 2>&1 || true
+
+mkdir -p /etc/hotplug.d/uci /usr/bin /usr/lib/subparser /etc/init.d \
+         /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/view
+
+# Очистка старых pyc файлов и развертывание библиотеки
+rm -rf /usr/lib/subparser/__pycache__
+cp -rf "${SRC_PATH}/usr/lib/subparser/"* /usr/lib/subparser/
 
 cp -f "${SRC_PATH}/usr/bin/"* /usr/bin/
 cp -f "${SRC_PATH}/etc/init.d/"* /etc/init.d/
@@ -55,6 +63,9 @@ cp -f "${SRC_PATH}/www/luci-static/resources/view/"* /www/luci-static/resources/
 rm -f /usr/share/rpcd/acl.d/subparser.json 2>/dev/null || true
 
 chmod +x /usr/bin/subparser* /etc/init.d/subparser*
+
+# Предкомпиляция Python-файлов
+python3 -m py_compile /usr/lib/subparser/*.py /usr/bin/subparser-bot.py /usr/bin/subparser.py >/dev/null 2>&1 || true
 
 # --- Проверка и гарантированная регистрация watchdog в cron ---
 CRON_TMP="/tmp/cron_subparser_upd.tmp"

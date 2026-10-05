@@ -22,6 +22,7 @@ rm -f "$CRON_TMP"
 
 echo "=== [3/5] Удаление файлов приложения ==="
 rm -f /usr/bin/subparser*
+rm -rf /usr/lib/subparser
 rm -f /etc/init.d/subparser /etc/init.d/subparser-bot
 rm -f /etc/hotplug.d/uci/99-subparser 2>/dev/null || true
 rm -f /etc/subparser_version /etc/subparser_commit 2>/dev/null || true

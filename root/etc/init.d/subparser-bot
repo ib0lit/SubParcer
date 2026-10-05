@@ -15,7 +15,7 @@ start_service() {
     [ -n "$chat_id" ] && [ "$chat_id" != "null" ] || return 0
 
     procd_open_instance
-    procd_set_param command /usr/bin/python3 /usr/bin/subparser-bot.py
+    procd_set_param command /usr/bin/python3 -u /usr/bin/subparser-bot.py
     procd_set_param respawn 3600 5 0
     procd_set_param stdout 1
     procd_set_param stderr 1

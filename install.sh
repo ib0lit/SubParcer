@@ -23,13 +23,11 @@ if command -v apk >/dev/null 2>&1; then
     echo "[*] Обнаружен менеджер apk (OpenWrt 25+)"
     apk update
     apk add python3 curl ca-certificates
-    # Подбор conntrack утилиты для разных веток apk
     apk add conntrack-tools >/dev/null 2>&1 || apk add conntrack >/dev/null 2>&1 || true
 elif command -v opkg >/dev/null 2>&1; then
     echo "[*] Обнаружен менеджер opkg (OpenWrt 19-24)"
     opkg update
     opkg install python3 curl ca-certificates ca-bundle
-    # Подбор conntrack-tools для opkg
     opkg install conntrack-tools >/dev/null 2>&1 || opkg install conntrack >/dev/null 2>&1 || true
 else
     echo "[!] Предупреждение: пакетный менеджер не найден. Пропуск шага."
@@ -46,7 +44,8 @@ curl -sL "https://github.com/${REPO_USER}/${REPO_NAME}/archive/refs/heads/${BRAN
 SRC_PATH="${TMP_DIR}/${REPO_NAME}-${BRANCH}/root"
 
 echo "=== [3/6] Развертывание системных файлов и конфигурации ==="
-mkdir -p /etc/config /etc/init.d /usr/bin /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/view /etc/hotplug.d/uci
+mkdir -p /etc/config /etc/init.d /usr/bin /usr/lib/subparser \
+         /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/view /etc/hotplug.d/uci
 
 if [ ! -f /etc/config/subparser ]; then
     cp -f "${SRC_PATH}/etc/config/subparser" /etc/config/subparser
@@ -76,6 +75,10 @@ else
     uci commit subparser
 fi
 
+# Копирование модулей Python и системных утилит
+rm -rf /usr/lib/subparser/*
+cp -rf "${SRC_PATH}/usr/lib/subparser/"* /usr/lib/subparser/ 2>/dev/null || true
+
 cp -f "${SRC_PATH}/etc/init.d/"* /etc/init.d/ 2>/dev/null || true
 cp -f "${SRC_PATH}/usr/bin/"* /usr/bin/ 2>/dev/null || true
 cp -f "${SRC_PATH}/usr/share/luci/menu.d/"* /usr/share/luci/menu.d/ 2>/dev/null || true
@@ -87,9 +90,12 @@ cp -f "${SRC_PATH}/www/luci-static/resources/view/"* /www/luci-static/resources/
 # Удаление устаревшего ACL-дубликата
 rm -f /usr/share/rpcd/acl.d/subparser.json 2>/dev/null || true
 
-echo "=== [4/6] Настройка прав доступа ==="
+echo "=== [4/6] Настройка прав доступа и компиляция ==="
 chmod +x /etc/init.d/subparser /etc/init.d/subparser-bot 2>/dev/null || true
 chmod +x /usr/bin/subparser* 2>/dev/null || true
+
+# Проверка синтаксиса модулей
+python3 -m py_compile /usr/lib/subparser/*.py /usr/bin/subparser-bot.py /usr/bin/subparser.py >/dev/null 2>&1 || true
 
 echo "=== [5/6] Регистрация задач и автозапуск ==="
 CRON_TMP="/tmp/cron_subparser_inst.tmp"
