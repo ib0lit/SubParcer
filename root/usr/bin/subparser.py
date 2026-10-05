@@ -283,6 +283,9 @@ def parse_link_to_singbox_outbound(link: str, tag: str) -> dict:
         transport_obj = {"type": "http", "host": [query.get("host", [sni])[0]], "path": query.get("path", ["/"])[0]}
     elif transport_type in ("httpupgrade", "upgrade"):
         transport_obj = {"type": "httpupgrade", "host": query.get("host", [sni])[0], "path": query.get("path", ["/"])[0]}
+    elif transport_type in ("xhttp", "splithttp"):
+        mode = query.get("mode", ["auto"])[0]
+        transport_obj = {"type": "xhttp", "host": query.get("host", [sni])[0], "path": query.get("path", ["/"])[0], "mode": mode, "x_padding_bytes": query.get("x_padding_bytes", query.get("padding", ["100-500"]))[0]}
 
     if scheme == "vless":
         outbound["uuid"] = auth
