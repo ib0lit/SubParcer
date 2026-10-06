@@ -556,6 +556,7 @@ def get_status_screen():
         f"• <b>Синхронизация SubParser:</b> {is_sync}\n"
     )
     kb = {"inline_keyboard": [
+        [{"text": "🚀 Замер скорости канала", "callback_data": "run_speedtest"}],
         [{"text": "📜 Лог системы (logread)", "callback_data": "log_sys"}],
         [{"text": "🖨 Лог ядра (dmesg)", "callback_data": "log_dmesg"}],
         [{"text": "🔄 Обновить статус", "callback_data": "status"}, {"text": "♻️ Рестарт Podkop", "callback_data": "restart"}],

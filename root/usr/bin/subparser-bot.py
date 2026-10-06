@@ -462,6 +462,26 @@ def main():
                         t, kb = get_services_status_screen()
                         edit_msg(token, chat_id, msg_id, t, kb)
 
+                    elif data == "run_speedtest":
+                        answer_callback(token, cb_id, "Замеряю скорость...")
+                        edit_msg(token, chat_id, msg_id, "⏳ <b>Тестирую скорость скачивания через туннель...</b>\n<i>(загрузка пакета 10 МБ через активный узел)</i>")
+                        from subparser.system import measure_download_speed
+                        ok, speed, elapsed = measure_download_speed()
+                        if ok:
+                            res_text = (
+                                "🚀 <b>Результат теста скорости</b>\n\n"
+                                f"• Скорость загрузки: <b>{speed}</b>\n"
+                                f"• Время загрузки: <code>{elapsed}</code>\n"
+                                f"• Маршрут: через активный туннель Podkop\n"
+                            )
+                        else:
+                            res_text = "❌ <b>Ошибка замера скорости.</b>\nТаймаут соединения с тестовым CDN сервером."
+                        kb_back = {"inline_keyboard": [
+                            [{"text": "🔄 Повторить замер", "callback_data": "run_speedtest"}],
+                            [{"text": "◀️ В меню статуса", "callback_data": "status"}]
+                        ]}
+                        edit_msg(token, chat_id, msg_id, res_text, kb_back)
+
                     elif data == "status":
                         answer_callback(token, cb_id)
                         t, kb = get_status_screen()

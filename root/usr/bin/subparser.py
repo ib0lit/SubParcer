@@ -247,7 +247,7 @@ def fetch_single_sub(sub_info: dict) -> list:
     if not raw_data:
         try:
             curl_cmd = [
-                "curl", "-sL", "-k", "-m", "15",
+                "curl", "-sL", "-k", "-m", "15", "-D", "/tmp/sub_headers.tmp",
                 "-H", f"User-Agent: {ua}",
                 "-H", f"x-hwid: {HWID_PHONE}",
                 "-H", f"device-id: {HWID_PHONE}",
@@ -258,6 +258,17 @@ def fetch_single_sub(sub_info: dict) -> list:
             res = subprocess.run(curl_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if res.returncode == 0 and res.stdout:
                 raw_data = res.stdout
+                if os.path.exists("/tmp/sub_headers.tmp"):
+                    try:
+                        with open("/tmp/sub_headers.tmp", "r", errors="ignore") as hf:
+                            for hline in hf:
+                                if "subscription-userinfo:" in hline.lower():
+                                    u_val = hline.split(":", 1)[1].strip()
+                                    GLOBAL_SUB_USERINFO[name] = parse_userinfo_header(u_val)
+                                    break
+                        os.remove("/tmp/sub_headers.tmp")
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -282,6 +293,7 @@ def fetch_single_sub(sub_info: dict) -> list:
     for l in text.splitlines():
         l_clean = l.strip()
         if "://" in l_clean and "0.0.0.0" not in l_clean:
+            # Оставляем ссылку нетронутой, включая хэш #имя
             found.append(l_clean)
 
     print(f"  [OK] Из подписки '{name}' получено {len(found)} боевых узлов.")
@@ -627,11 +639,31 @@ def main():
                 target_links = best
                 after_cnt = len(target_links)
                 print(f"Секция '{sec}': полная замена (было {before_cnt} -> стало {after_cnt})")
-                section_reports.append(f"  ▫️ <b>{sec}</b>: полная замена (было {before_cnt} → стало {after_cnt})")
+                section_reports.append(f"  ▫️ <b>{sec}</b>: полная замена (было {before_cnt} -> стало {after_cnt})")
 
-            subprocess.run(["uci", "-q", "delete", f"podkop.{sec}.urltest_proxy_links"], check=False)
-            for link in target_links:
-                subprocess.run(["uci", "add_list", f"podkop.{sec}.urltest_proxy_links={link}"], check=False)
+            batch_cmds = [f"delete podkop.{sec}.urltest_proxy_links"]
+            for idx, raw_l in enumerate(target_links):
+                l_str = raw_l.strip()
+                if "#" in l_str:
+                    base_url, raw_name = l_str.split("#", 1)
+                else:
+                    base_url = l_str
+                    # Если имени нет в ссылке, достаем из результатов
+                    raw_name = results.get(raw_l, {}).get("name", "")
+                
+                # Декодируем и заново безопасно кодируем ТОЛЬКО фрагмент имени
+                unquoted_name = urllib.parse.unquote(raw_name).strip()
+                if not unquoted_name or unquoted_name.startswith("n_"):
+                    pr = urllib.parse.urlsplit(base_url).scheme.upper()
+                    host = urllib.parse.urlsplit(base_url).hostname or f"Node-{idx+1}"
+                    unquoted_name = f"{host} | {pr}"
+                
+                safe_encoded_name = urllib.parse.quote(unquoted_name)
+                # Передаем всю ссылку внутри двойных кавычек: uci batch не сочтет # комментарием
+                batch_cmds.append(f"add_list podkop.{sec}.urltest_proxy_links=\"{base_url}#{safe_encoded_name}\"")
+
+            p = subprocess.Popen(["uci", "-q", "batch"], stdin=subprocess.PIPE, text=True)
+            p.communicate(input="\n".join(batch_cmds) + "\n")
 
         subprocess.run(["uci", "commit", "podkop"], check=False)
         update_live_progress("♻️ [4/4] Обновление Podkop...", "Запись серверов в UCI и перезапуск службы...")
@@ -668,6 +700,11 @@ def main():
             f"🏷 <b>Протоколы:</b> <code>{proto_str}</code>"
         )
         if GLOBAL_SUB_USERINFO:
+            try:
+                with open("/tmp/subparser_subinfo.json", "w", encoding="utf-8") as s_file:
+                    json.dump(GLOBAL_SUB_USERINFO, s_file)
+            except Exception:
+                pass
             sub_lines = []
             for sname, sdata in GLOBAL_SUB_USERINFO.items():
                 used = sdata.get("upload", 0) + sdata.get("download", 0)

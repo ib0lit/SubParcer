@@ -180,3 +180,25 @@ def check_single_service(item):
         ok = False
 
     return name, is_proxied, ok, ms
+
+
+def measure_download_speed():
+    test_url = "https://speed.cloudflare.com/__down?bytes=10485760"
+    cmd = [
+        "curl", "-s", "-x", "socks5h://127.0.0.1:4534",
+        "-w", "%{http_code} %{speed_download} %{time_total}",
+        "-o", "/dev/null", "-m", "10",
+        test_url
+    ]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        parts = res.stdout.strip().split()
+        if len(parts) >= 3 and parts[0] == "200":
+            bytes_sec = float(parts[1])
+            elapsed = float(parts[2])
+            if bytes_sec > 0:
+                mbps = (bytes_sec * 8.0) / (1024.0 * 1024.0)
+                return True, f"{mbps:.1f} Мбит/с", f"{elapsed:.1f}с"
+    except Exception:
+        pass
+    return False, "0 Мбит/с", "ошибка"

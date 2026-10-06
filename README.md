@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/sing--box-1.8+-E34F26?style=flat-square" alt="sing-box" />
   <img src="https://img.shields.io/badge/Telegram_Bot-Ready-24A1DE?style=flat-square&logo=telegram&logoColor=white" alt="Telegram Bot" />
   <img src="https://img.shields.io/badge/LuCI-Integrated-00D26A?style=flat-square" alt="LuCI" />
-  <img src="https://img.shields.io/badge/Version-v2.1.3-blueviolet?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/Version-v2.1.4-blueviolet?style=flat-square" alt="Version" />
 </p>
 
 > [!CAUTION]
