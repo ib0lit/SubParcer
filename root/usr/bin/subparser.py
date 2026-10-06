@@ -141,10 +141,13 @@ def get_real_podkop_sections() -> list:
 def get_target_sections() -> list:
     real = get_real_podkop_sections()
     try:
-        out = subprocess.check_output(["uci", "-q", "get", f"{CONFIG_NAME}.settings.target_section"], text=True).strip()
-        sections = [s.strip() for s in out.split() if s.strip()]
+        raw = subprocess.check_output(["uci", "-q", "get", f"{CONFIG_NAME}.settings.target_section"], text=True).strip()
+        sections = [s.strip() for s in raw.split() if s.strip()]
         valid = [s for s in sections if s in real]
-        # Если список пуст или все указанные секции удалены — обновляем все существующие секции
+        # Добавляем все обнаруженные секции Podkop, чтобы новые подхватывались автоматически
+        for s in real:
+            if s not in valid:
+                valid.append(s)
         return valid if valid else real
     except Exception:
         return real

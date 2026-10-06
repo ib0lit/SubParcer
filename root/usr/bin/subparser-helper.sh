@@ -13,13 +13,17 @@ LOCK_FILE="/var/run/subparser.lock"
 
 case "$ACTION" in
     get_podkop_sections)
-        # Совместимо со всеми версиями OpenWrt (парсинг UCI-конфига podkop)
-        SECTIONS=$(uci -q show podkop 2>/dev/null | grep "=podkop" | cut -d'.' -f2 | cut -d'=' -f1)
-        if [ -z "$SECTIONS" ]; then
-            SECTIONS=$(uci -q show podkop 2>/dev/null | grep "urltest_proxy_links" | cut -d'.' -f2 | sort -u)
-        fi
+        SECTIONS=$(uci -q show podkop 2>/dev/null | grep -E "=podkop|urltest_proxy_links" | cut -d"." -f2 | cut -d"=" -f1 | sort -u)
         [ -z "$SECTIONS" ] && SECTIONS="main"
-
+        
+        # Автоматическая синхронизация конфига subparser: чистим старое, добавляем актуальное
+        CUR_SECS=$(uci -q get subparser.settings.target_section)
+        uci -q delete subparser.settings.target_section
+        for s in $SECTIONS; do
+            uci add_list subparser.settings.target_section="$s"
+        done
+        uci commit subparser
+        
         echo "["
         FIRST=1
         for s in $SECTIONS; do

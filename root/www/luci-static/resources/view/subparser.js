@@ -77,12 +77,11 @@ return view.extend({
         var m = new form.Map('subparser', _('SubParser'), _('Многопоточный парсер подписок с тонкой настройкой секций Podkop и дедупликацией.'));
 
         var s = m.section(form.NamedSection, 'settings', 'subparser', _('Настройки сервиса'));
-        s.tab('general', _('⚙️ Основные настройки'));
+        s.tab('general', _('⚙️️ Основные настройки'));
         s.tab('sections', _('📁 Секции Podkop'));
         s.tab('telegram', _('💬 Telegram'));
         s.tab('subscriptions', _('📋 Подписки'));
 
-        // ================= ВКЛАДКА 1: ОСНОВНЫЕ НАСТРОЙКИ =================
         var o = s.taboption('general', form.Flag, 'enabled', _('Включить сервис'));
         o.rmempty = false;
 
@@ -166,16 +165,14 @@ return view.extend({
             });
         };
 
-        // ================= ВКЛАДКА 2: СЕКЦИИ PODKOP =================
         var per_sec = s.taboption('sections', form.Flag, 'per_section_config', _('Индивидуальная настройка каждой секции'));
         per_sec.description = _('Позволяет задать персональный режим обновления для каждого профиля Podkop.');
         per_sec.default = '0';
 
-        // Глобальные настройки (когда флаг выключен)
         var glob_sec = s.taboption('sections', form.DynamicList, 'target_section', _('Целевые секции Podkop'));
         glob_sec.description = _('Выберите секции для обновления.');
         self.availableSections.forEach(function(sec) { glob_sec.value(sec, sec); });
-        glob_sec.default = ['main'];
+        glob_sec.default = self.availableSections;
         glob_sec.depends('per_section_config', '0');
 
         var glob_mode = s.taboption('sections', form.ListValue, 'update_mode', _('Режим обновления'));
@@ -184,7 +181,6 @@ return view.extend({
         glob_mode.default = 'replace';
         glob_mode.depends('per_section_config', '0');
 
-        // Индивидуальные настройки для каждой найденной секции (когда флаг включен)
         self.availableSections.forEach(function(sec) {
             var sec_en = s.taboption('sections', form.Flag, 'sec_en_' + sec, _('Обновлять секцию') + ' [' + sec + ']');
             sec_en.default = '1';
@@ -197,7 +193,6 @@ return view.extend({
             sec_m.depends('per_section_config', '1');
         });
 
-        // ================= ВКЛАДКА 3: TELEGRAM =================
         o = s.taboption('telegram', form.Value, 'tg_bot_token', _('Telegram Bot Token'));
         o.placeholder = '123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ';
         o.rmempty = true;
@@ -226,7 +221,6 @@ return view.extend({
             });
         };
 
-        // ================= ВКЛАДКА 4: ПОДПИСКИ =================
         var s_subs = m.section(form.GridSection, 'subscription', _('Источники подписок'));
         s_subs.tab = 'subscriptions';
         s_subs.addremove = true;
@@ -255,7 +249,6 @@ return view.extend({
         sub_ua.value('curl', 'curl (Generic)');
         sub_ua.default = 'v2rayN';
 
-        // ================= ДАШБОРД УЗЛОВ ВНИЗУ СТРАНИЦЫ =================
         var s2 = m.section(form.NamedSection, 'settings', 'subparser', _('🌐 Активные узлы в конфигурации Podkop'));
         var dashboardContainer = E('div', { 'id': 'subparser_dashboard_box' });
 
