@@ -121,13 +121,33 @@ def get_uci(option, default=""):
     except Exception:
         return default
 
+def get_real_podkop_sections() -> list:
+    try:
+        raw_secs = subprocess.check_output(["uci", "-q", "show", "podkop"], text=True)
+        detected = []
+        for line in raw_secs.splitlines():
+            if "=podkop" in line:
+                s = line.split(".")[1].split("=")[0]
+                if s not in detected:
+                    detected.append(s)
+            elif "urltest_proxy_links" in line:
+                s = line.split(".")[1]
+                if s not in detected:
+                    detected.append(s)
+        return detected if detected else ["main"]
+    except Exception:
+        return ["main"]
+
 def get_target_sections() -> list:
+    real = get_real_podkop_sections()
     try:
         out = subprocess.check_output(["uci", "-q", "get", f"{CONFIG_NAME}.settings.target_section"], text=True).strip()
         sections = [s.strip() for s in out.split() if s.strip()]
-        return sections if sections else ["main"]
+        valid = [s for s in sections if s in real]
+        # Если список пуст или все указанные секции удалены — обновляем все существующие секции
+        return valid if valid else real
     except Exception:
-        return ["main"]
+        return real
 
 def get_subscriptions():
     try:

@@ -54,10 +54,15 @@ def get_parser_menu_screen(prompt_custom_ping=False):
         sections_str = ", ".join(sec_parts) if sec_parts else "Все выключены"
     else:
         raw_targets = get_uci_val("target_section", "main").split()
-        target_list = raw_targets if raw_targets else ["main"]
+        existing_valid = [s for s in raw_targets if s in all_secs]
+        for s in all_secs:
+            if s not in existing_valid:
+                existing_valid.append(s)
+        target_list = existing_valid if existing_valid else ["main"]
         g_mode = get_uci_val("update_mode", "replace")
         mode_label = "Замена" if g_mode == "replace" else "Добавление"
         sections_str = f"{', '.join(target_list)} ({mode_label})"
+
     text = (
         "⚙️ <b>Параметры парсера SubParser</b>\n\n"
         f"📋 <b>Подписок:</b> <code>{subs_count} шт.</code>\n"
@@ -177,7 +182,11 @@ def get_sections_menu_screen():
 
     if not per_sec:
         raw_targets = get_uci_val("target_section", "main").split()
-        target_set = set(raw_targets) if raw_targets else {"main"}
+        target_set = set(raw_targets) if raw_targets else set(all_secs)
+        for s in all_secs:
+            if s not in target_set:
+                target_set.add(s)
+
         g_mode = get_uci_val("update_mode", "replace")
         mode_label = "🔄 Замена серверов" if g_mode == "replace" else "➕ Добавление (без дублей)"
 

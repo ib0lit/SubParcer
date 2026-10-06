@@ -28,8 +28,25 @@ fi
 LAN_IP=$(uci -q get network.lan.ipaddr | cut -d'/' -f1)
 [ -z "$LAN_IP" ] && LAN_IP="192.168.1.1"
 
-CHECK_SEC=$(uci -q get subparser.settings.target_section | awk '{print $1}')
-[ -z "$CHECK_SEC" ] && CHECK_SEC="main"
+# --- Валидация существования секции ---
+RAW_SECS=$(uci -q get subparser.settings.target_section)
+[ -z "$RAW_SECS" ] && RAW_SECS="main"
+
+CHECK_SEC=""
+for s in $RAW_SECS; do
+    # Проверяем, существует ли секция в конфигурации /etc/config/podkop
+    if uci -q get "podkop.${s}" >/dev/null 2>&1 || uci -q get "podkop.${s}.urltest_proxy_links" >/dev/null 2>&1; then
+        CHECK_SEC="$s"
+        break
+    fi
+done
+
+# Если все сохраненные секции были удалены из Podkop, берем существующую или main
+if [ -z "$CHECK_SEC" ]; then
+    FALLBACK_SEC=$(uci -q show podkop 2>/dev/null | grep "=podkop" | cut -d'.' -f2 | cut -d'=' -f1 | head -n 1)
+    [ -z "$FALLBACK_SEC" ] && FALLBACK_SEC="main"
+    CHECK_SEC="$FALLBACK_SEC"
+fi
 
 TEST_URL="https%3A%2F%2Fcp.cloudflare.com%2Fgenerate_204"
 RESP=$(curl -s -m 6 "http://${LAN_IP}:9090/proxies/${CHECK_SEC}-urltest-out/delay?url=${TEST_URL}&timeout=4000" 2>/dev/null)
