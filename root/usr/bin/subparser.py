@@ -338,7 +338,7 @@ def parse_link_to_singbox_outbound(link: str, tag: str) -> dict:
         "tag": tag,
         "server": server,
         "server_port": port,
-        "routing_mark": 255
+        
     }
 
     sni = query.get("sni", [query.get("peer", [server])[0]])[0] or server
@@ -478,7 +478,7 @@ def main():
         except Exception:
             continue
 
-    outbounds.append({"type": "direct", "tag": "direct", "routing_mark": 255})
+    outbounds.append({"type": "direct", "tag": "direct", })
     cfg = {
         "log": {"level": "warn"},
         "experimental": {
@@ -486,28 +486,8 @@ def main():
                 "external_controller": f"127.0.0.1:{api_port}"
             }
         },
-        "dns": {
-            "servers": [
-                {
-                    "tag": "dns-direct",
-                    "type": "udp",
-                    "server": "77.88.8.8",
-                    "server_port": 53,
-                    "detour": "direct"
-                },
-                {
-                    "tag": "dns-cf",
-                    "type": "udp",
-                    "server": "1.1.1.1",
-                    "server_port": 53,
-                    "detour": "direct"
-                }
-            ],
-            "strategy": "prefer_ipv4"
-        },
         "route": {
-            "auto_detect_interface": True,
-            "default_domain_resolver": "dns-direct"
+            "auto_detect_interface": True
         },
         "outbounds": outbounds
     }
