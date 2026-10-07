@@ -337,8 +337,7 @@ def parse_link_to_singbox_outbound(link: str, tag: str) -> dict:
         "type": "vless" if scheme == "vless" else ("trojan" if scheme == "trojan" else "hysteria2"),
         "tag": tag,
         "server": server,
-        "server_port": port,
-        
+        "server_port": port
     }
 
     sni = query.get("sni", [query.get("peer", [server])[0]])[0] or server
@@ -478,7 +477,7 @@ def main():
         except Exception:
             continue
 
-    outbounds.append({"type": "direct", "tag": "direct", })
+    outbounds.append({"type": "direct", "tag": "direct"})
     cfg = {
         "log": {"level": "warn"},
         "experimental": {
