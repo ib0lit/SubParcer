@@ -196,9 +196,22 @@ return view.extend({
         o = s.taboption('telegram', form.Value, 'tg_bot_token', _('Telegram Bot Token'));
         o.placeholder = '123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ';
         o.rmempty = true;
+        o.password = true;
+        o.description = _('Токен бота от <b>@BotFather</b>.<br>' +
+                          '<i>Как получить:</i> отправьте боту <code>@BotFather</code> команду <code>/newbot</code>, ' +
+                          'укажите имя и юзернейм бота. Скопируйте полученный токен API.');
 
-        o = s.taboption('telegram', form.Value, 'tg_chat_id', _('Telegram Chat ID'));
+        o = s.taboption('telegram', form.Value, 'tg_chat_id', _('Основной Chat / User ID (Admin)'));
         o.placeholder = '123456789';
+        o.rmempty = true;
+        o.datatype = 'integer';
+        o.description = _('Ваш цифровой ID администратора для получения системных алертов и отчетов сбоев.<br>' +
+                          '<i>Как узнать:</i> напишите в Telegram боту <code>@userinfobot</code> или <code>@getmyid_bot</code> — скопируйте значение <b>Id</b>.');
+
+        o = s.taboption('telegram', form.DynamicList, 'allowed_users', _('Авторизованные пользователи'));
+        o.datatype = 'integer';
+        o.description = _('Список дополнительных Telegram ID, которым разрешено нажимать кнопки и управлять ботом.<br>' +
+                          'Укажите ID членов семьи или доверенных лиц, предварительно узнав их через <code>@userinfobot</code>.');
         o.rmempty = true;
 
         o = s.taboption('telegram', form.Button, '_test_tg', _('Проверка связи'));

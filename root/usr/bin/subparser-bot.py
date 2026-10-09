@@ -27,15 +27,28 @@ from subparser.podkop import (
     batch_ping_nodes, run_parser_process
 )
 from subparser.screens import (
-    get_main_screen, get_parser_menu_screen, get_subs_list_screen,
-    get_sub_card_screen, get_sub_delete_confirm_screen,
+    get_clients_screen, get_device_action_screen, get_dmesg_screen,
+    get_log_screen, get_logread_screen, get_main_screen,
+    get_parser_menu_screen, get_reboot_confirm_screen,
     get_sections_menu_screen, get_sections_selector_screen,
-    get_servers_screen, get_system_metrics, get_clients_screen,
-    get_device_action_screen, get_services_status_screen,
-    get_status_screen, get_log_screen, get_logread_screen,
-    get_dmesg_screen, get_reboot_confirm_screen
+    get_servers_screen, get_services_status_screen, get_status_screen,
+    get_sub_card_screen, get_sub_delete_confirm_screen, get_subs_list_screen
 )
 
+def get_allowed_user_ids():
+    ids = set()
+    try:
+        import subprocess
+        admin = subprocess.check_output(['uci', '-q', 'get', 'subparser.settings.tg_chat_id'], text=True).strip()
+        if admin.isdigit():
+            ids.add(int(admin))
+        res = subprocess.check_output(['uci', '-q', 'get', 'subparser.settings.allowed_users'], text=True).strip()
+        for item in res.split():
+            if item.isdigit():
+                ids.add(int(item))
+    except Exception:
+        pass
+    return ids
 def watch_parser_and_restore_menu(token, chat_id, old_msg_id):
     # Ждем пока subparser.py реально начнет работу
     time.sleep(3)
@@ -94,8 +107,12 @@ def main():
                 if "message" in u:
                     msg = u["message"]
                     user_id = str(msg.get("from", {}).get("id", "")).strip()
-                    if user_id != admin_id:
+                    username = msg.get("from", {}).get("username", "unknown")
+                    allowed = {str(i) for i in get_allowed_user_ids()}
+                    if user_id not in allowed:
+                        print(f"[AUTH REJECT] Msg from unauthorized user {username} (ID: {user_id})")
                         continue
+                    print(f"[MSG] From {username} (ID: {user_id}): {msg.get('text', '')}")
 
                     raw_text = msg.get("text", "").strip()
                     if not raw_text:
@@ -174,13 +191,24 @@ def main():
                     cb = u["callback_query"]
                     cb_id = cb["id"]
                     user_id = str(cb.get("from", {}).get("id", "")).strip()
-                    if user_id != admin_id:
+                    username = cb.get("from", {}).get("username", "unknown")
+                    allowed = {str(i) for i in get_allowed_user_ids()}
+                    if user_id not in allowed:
+                        print(f"[AUTH REJECT] Click from unauthorized user {username} (ID: {user_id})")
+                        answer_callback(token, cb_id, "⛔ Доступ ограничен")
                         continue
+                    print(f"[CLICK] From {username} (ID: {user_id}) -> {cb.get('data', '')}")
 
                     data = cb.get("data", "")
                     msg_obj = cb.get("message", {})
                     msg_id = msg_obj.get("message_id")
                     chat_id = msg_obj.get("chat", {}).get("id")
+
+                    ADMIN_PREFIXES = ('sub_del_', 'reboot', 'do_reboot', 'restart', 'enter_del_mode', 'srv_del_pg')
+                    if any(data == p or data.startswith(p) for p in ADMIN_PREFIXES) and user_id != admin_id:
+                        print(f"[AUTH REJECT] Admin-only action '{data}' blocked for user {username} ({user_id})")
+                        answer_callback(token, cb_id, "⛔ Действие доступно только администратору!")
+                        continue
 
                     if data == "close_msg":
                         set_user_state({})
