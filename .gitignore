@@ -4,3 +4,4 @@ sync-pull.sh
 __pycache__/
 *.pyc
 *.pyo
+SubParser.zip
