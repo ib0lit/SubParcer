@@ -1,5 +1,14 @@
 # ⚡ SubParser for OpenWrt
 
+<p align="center">
+  <img src="https://img.shields.io/badge/OpenWrt-21.02_--_25.x-0099E5?style=flat-square&logo=openwrt&logoColor=white" alt="OpenWrt" />
+  <img src="https://img.shields.io/badge/Python-3.9_--_3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/sing--box-1.8+-E34F26?style=flat-square" alt="sing-box" />
+  <img src="https://img.shields.io/badge/Telegram_Bot-Ready-24A1DE?style=flat-square&logo=telegram&logoColor=white" alt="Telegram Bot" />
+  <img src="https://img.shields.io/badge/LuCI-Integrated-00D26A?style=flat-square" alt="LuCI" />
+  <img src="https://img.shields.io/badge/Version-v2.1.4-blueviolet?style=flat-square" alt="Version" />
+</p>
+
 > [!CAUTION]
 > ### ⚠ Дисклеймер
 > 
@@ -123,10 +132,10 @@ sh -c "$(curl -sL https://raw.githubusercontent.com/ib0lit/SubParser/main/uninst
 
 * **Гибкий cron-планировщик**: периодичность раз в 1ч, 12ч, 24ч, каждые N часов или ежедневно в точное время (`ЧЧ:ММ`).
 * **Умный сторожевой таймер (subparser-watchdog.sh)**: непрерывный контроль доступности REST API sing-box каждые 5 минут. Включает трехуровневую защиту от ложных тревог:
-- Проверка физической связи (WAN) через независимые DNS (Яндекс/Cloudflare);
-- Серия из 3 повторных замеров с интервалом 7 секунд для фильтрации кратковременных просадок;
-- 45-минутный кулдаун для исключения циклической нагрузки на CPU и флеш-память при затяжных сбоях.
-- При подтвержденной аварии автоматически перезапускает службу Podkop, инициирует экстренный отбор живых прокси и отправляет алерт в Telegram. 
+  - Проверка физической связи (WAN) через независимые DNS (Яндекс/Cloudflare);
+  - Серия из 3 повторных замеров с интервалом 7 секунд для фильтрации кратковременных просадок;
+  - 45-минутный кулдаун для исключения циклической нагрузки на CPU и флеш-память при затяжных сбоях.
+  - При подтвержденной аварии автоматически перезапускает службу Podkop, инициирует экстренный отбор живых прокси и отправляет алерт в Telegram. 
 * **Упреждающие алерты по лимитам**: watchdog ежедневно контролирует израсходованный трафик и срок действия подписок, заранее предупреждая в Telegram при остатке менее 3 дней или расходе более 90% пакета.
 
 ---
