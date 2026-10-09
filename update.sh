@@ -33,7 +33,7 @@ else
 fi
 
 echo "=== [2/5] Проверка дискового пространства ==="
-MIN_KB_UPDATE=4096  # ~4 MB для безопасной распаковки и перекомпиляции pyc
+MIN_KB_UPDATE=512  # Требуется ~500 KB для безопасной перезаписи файлов и компиляции pyc
 
 TARGET_DIR="/"
 if df -k /overlay 2>/dev/null | grep -q "overlay"; then
@@ -48,14 +48,14 @@ esac
 
 if [ -n "$FREE_KB" ]; then
     FREE_MB=$((FREE_KB / 1024))
-    echo "[*] Доступно памяти на ${TARGET_DIR}: ${FREE_MB} MB"
+    echo "[*] Доступно памяти на ${TARGET_DIR}: ${FREE_MB} MB (${FREE_KB} KB)"
 
     if [ "$FREE_KB" -lt "$MIN_KB_UPDATE" ]; then
         echo ""
         echo "=========================================================="
-        echo " ❌ [ОШИБКА] Недостаточно свободного места для обновления!"
-        echo " Доступно: ${FREE_MB} MB"
-        echo " Требуется минимум: 4 MB"
+        echo " ❌ [ОШИБКА] Критически мало места для обновления!"
+        echo " Доступно: ${FREE_KB} KB"
+        echo " Требуется минимум: ${MIN_KB_UPDATE} KB (0.5 MB)"
         echo ""
         echo " Обновление отменено во избежание сбоя файловой системы."
         echo "=========================================================="
@@ -75,6 +75,7 @@ curl -sL "https://github.com/${REPO_USER}/${REPO_NAME}/archive/refs/heads/${BRAN
 SRC_PATH="${TMP_DIR}/${REPO_NAME}-${BRANCH}/root"
 
 echo "=== [4/5] Применение обновлений и миграция структуры ==="
+# Остановка бота перед заменой файлов
 /etc/init.d/subparser-bot stop >/dev/null 2>&1 || true
 
 mkdir -p /etc/hotplug.d/uci /usr/bin /usr/lib/subparser /etc/init.d \
@@ -92,6 +93,7 @@ cp -f "${SRC_PATH}/www/luci-static/resources/view/"* /www/luci-static/resources/
 [ -f "${SRC_PATH}/etc/subparser_version" ] && cp -f "${SRC_PATH}/etc/subparser_version" /etc/subparser_version
 [ -d "${SRC_PATH}/etc/hotplug.d/uci" ] && cp -f "${SRC_PATH}/etc/hotplug.d/uci/"* /etc/hotplug.d/uci/ 2>/dev/null || true
 
+# Удаление устаревшего ACL-дубликата
 rm -f /usr/share/rpcd/acl.d/subparser.json 2>/dev/null || true
 
 chmod +x /usr/bin/subparser* /etc/init.d/subparser*
