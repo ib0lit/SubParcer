@@ -10,16 +10,12 @@ return view.extend({
 
     load: function() {
         var self = this;
-        return Promise.all([
-            fs.exec('/usr/bin/subparser-helper.sh', ['get_podkop_sections']).then(function(res) {
-                try { return JSON.parse(res.stdout.trim() || '["main"]'); } catch(e) { return ['main']; }
-            }),
-            fs.exec('/usr/bin/subparser-helper.sh', ['get_links', 'main']).then(function(res) {
-                try { return JSON.parse(res.stdout.trim() || '[]'); } catch(e) { return []; }
-            })
-        ]).then(function(data) {
-            self.availableSections = data[0];
-            return data[1];
+        return fs.exec('/usr/bin/subparser-helper.sh', ['get_podkop_sections']).then(function(res) {
+            try { self.availableSections = JSON.parse(res.stdout.trim() || '["main"]'); } catch(e) { self.availableSections = ['main']; }
+            var initialSec = (self.availableSections.indexOf('main') !== -1) ? 'main' : (self.availableSections[0] || 'main');
+            return fs.exec('/usr/bin/subparser-helper.sh', ['get_links', initialSec]);
+        }).then(function(res) {
+            try { return JSON.parse(res.stdout.trim() || '[]'); } catch(e) { return []; }
         });
     },
 
@@ -77,7 +73,7 @@ return view.extend({
         var m = new form.Map('subparser', _('SubParser'), _('Многопоточный парсер подписок с тонкой настройкой секций Podkop и дедупликацией.'));
 
         var s = m.section(form.NamedSection, 'settings', 'subparser', _('Настройки сервиса'));
-        s.tab('general', _('⚙️️ Основные настройки'));
+        s.tab('general', _('⚙ Основные настройки'));
         s.tab('sections', _('📁 Секции Podkop'));
         s.tab('telegram', _('💬 Telegram'));
         s.tab('subscriptions', _('📋 Подписки'));
@@ -265,7 +261,23 @@ return view.extend({
         var s2 = m.section(form.NamedSection, 'settings', 'subparser', _('🌐 Активные узлы в конфигурации Podkop'));
         var dashboardContainer = E('div', { 'id': 'subparser_dashboard_box' });
 
-        var currentSec = 'main';
+        var currentSec = (self.availableSections && self.availableSections.indexOf('main') !== -1)
+            ? 'main'
+            : ((self.availableSections && self.availableSections[0]) ? self.availableSections[0] : 'main');
+
+        var hintBox = E('details', {
+            'class': 'alert-message info',
+            'style': 'margin-bottom: 12px; font-size: 13px; cursor: pointer;'
+        }, [
+            E('summary', { 'style': 'font-weight: bold; outline: none;' }, _('💡 Как работать со списком узлов (нажмите, чтобы раскрыть)')),
+            E('ul', { 'style': 'margin: 8px 0 0 18px; padding: 0; line-height: 1.5; cursor: default;' }, [
+                E('li', {}, _('Выберите нужный профиль Podkop в выпадающем списке секций.')),
+                E('li', {}, _('Нажмите «⚡ Обновить пинги», чтобы измерить задержку отклика серверов через ядро.')),
+                E('li', {}, _('Снимите галочки с проблемных серверов или оставьте только нужные.')),
+                E('li', {}, _('Нажмите «💾 Применить выбранные узлы» для перезаписи конфигурации профиля и рестарта Podkop.'))
+            ])
+        ]);
+
         var secSelect = E('select', {
             'class': 'cbi-input-select',
             'style': 'min-width: 140px; margin-right: 10px; font-weight: bold;',
@@ -278,7 +290,11 @@ return view.extend({
             }
         });
         self.availableSections.forEach(function(sname) {
-            secSelect.appendChild(E('option', { 'value': sname }, _('Секция: ') + sname));
+            var optAttrs = { 'value': sname };
+            if (sname === currentSec) {
+                optAttrs.selected = 'selected';
+            }
+            secSelect.appendChild(E('option', optAttrs, _('Секция: ') + sname));
         });
 
         var toolbar = E('div', { 'style': 'display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;' }, [
@@ -304,8 +320,8 @@ return view.extend({
 
         var dummy = s2.option(form.DummyValue, '_dashboard');
         dummy.rawhtml = true;
-        dummy.render = function() { return E('div', {}, [toolbar, dashboardContainer]); };
-        self.renderCards(dashboardContainer);
+        dummy.render = function() { return E('div', {}, [hintBox, toolbar, dashboardContainer]); };
+        self.renderCards(dashboardContainer, currentSec);
 
         return m.render();
     },
