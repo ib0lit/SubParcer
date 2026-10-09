@@ -7,7 +7,7 @@ BRANCH="main"
 COMMIT_FILE="/etc/subparser_commit"
 VERSION_FILE="/etc/subparser_version"
 
-echo "=== [1/4] Проверка наличия обновлений ==="
+echo "=== [1/5] Проверка наличия обновлений ==="
 
 REMOTE_SHA=$(curl -sL \
   -H "User-Agent: OpenWrt-SubParser-Updater" \
@@ -32,7 +32,41 @@ else
     echo "[*] Найдена новая версия: ${REMOTE_SHA:0:7}"
 fi
 
-echo "=== [2/4] Загрузка компонентов с GitHub ==="
+echo "=== [2/5] Проверка дискового пространства ==="
+MIN_KB_UPDATE=4096  # ~4 MB для безопасной распаковки и перекомпиляции pyc
+
+TARGET_DIR="/"
+if df -k /overlay 2>/dev/null | grep -q "overlay"; then
+    TARGET_DIR="/overlay"
+fi
+
+FREE_KB=$(df -k "$TARGET_DIR" 2>/dev/null | tail -n 1 | awk '{if (NF==1) {getline; print $(NF-2)} else {print $(NF-2)}}')
+
+case "$FREE_KB" in
+    ''|*[!0-9]*) FREE_KB="" ;;
+esac
+
+if [ -n "$FREE_KB" ]; then
+    FREE_MB=$((FREE_KB / 1024))
+    echo "[*] Доступно памяти на ${TARGET_DIR}: ${FREE_MB} MB"
+
+    if [ "$FREE_KB" -lt "$MIN_KB_UPDATE" ]; then
+        echo ""
+        echo "=========================================================="
+        echo " ❌ [ОШИБКА] Недостаточно свободного места для обновления!"
+        echo " Доступно: ${FREE_MB} MB"
+        echo " Требуется минимум: 4 MB"
+        echo ""
+        echo " Обновление отменено во избежание сбоя файловой системы."
+        echo "=========================================================="
+        exit 1
+    fi
+    echo "[OK] Памяти достаточно."
+else
+    echo "[!] Предупреждение: не удалось определить свободное место. Продолжаем..."
+fi
+
+echo "=== [3/5] Загрузка компонентов с GitHub ==="
 TMP_DIR="/tmp/subparser-update"
 rm -rf "$TMP_DIR"
 mkdir -p "$TMP_DIR"
@@ -40,8 +74,7 @@ mkdir -p "$TMP_DIR"
 curl -sL "https://github.com/${REPO_USER}/${REPO_NAME}/archive/refs/heads/${BRANCH}.tar.gz?nocache=$(date +%s)" | tar -xz -C "$TMP_DIR"
 SRC_PATH="${TMP_DIR}/${REPO_NAME}-${BRANCH}/root"
 
-echo "=== [3/4] Применение обновлений и миграция структуры ==="
-# Остановка бота перед заменой файлов
+echo "=== [4/5] Применение обновлений и миграция структуры ==="
 /etc/init.d/subparser-bot stop >/dev/null 2>&1 || true
 
 mkdir -p /etc/hotplug.d/uci /usr/bin /usr/lib/subparser /etc/init.d \
@@ -59,7 +92,6 @@ cp -f "${SRC_PATH}/www/luci-static/resources/view/"* /www/luci-static/resources/
 [ -f "${SRC_PATH}/etc/subparser_version" ] && cp -f "${SRC_PATH}/etc/subparser_version" /etc/subparser_version
 [ -d "${SRC_PATH}/etc/hotplug.d/uci" ] && cp -f "${SRC_PATH}/etc/hotplug.d/uci/"* /etc/hotplug.d/uci/ 2>/dev/null || true
 
-# Удаление устаревшего ACL-дубликата
 rm -f /usr/share/rpcd/acl.d/subparser.json 2>/dev/null || true
 
 chmod +x /usr/bin/subparser* /etc/init.d/subparser*
@@ -67,7 +99,7 @@ chmod +x /usr/bin/subparser* /etc/init.d/subparser*
 # Предкомпиляция Python-файлов
 python3 -m py_compile /usr/lib/subparser/*.py /usr/bin/subparser-bot.py /usr/bin/subparser.py >/dev/null 2>&1 || true
 
-# --- Проверка и гарантированная регистрация watchdog в cron ---
+# Регистрация watchdog в cron
 CRON_TMP="/tmp/cron_subparser_upd.tmp"
 crontab -l 2>/dev/null | grep -v "subparser-watchdog.sh" > "$CRON_TMP" || true
 echo "*/5 * * * * /usr/bin/subparser-watchdog.sh >/dev/null 2>&1" >> "$CRON_TMP"
@@ -75,7 +107,7 @@ crontab "$CRON_TMP" 2>/dev/null || true
 rm -f "$CRON_TMP"
 /etc/init.d/cron restart >/dev/null 2>&1 || true
 
-# --- Мягкая миграция UCI-конфига ---
+# Мягкая миграция UCI-конфига
 set_default_uci() {
     local opt="$1"
     local val="$2"
@@ -107,7 +139,7 @@ if [ -n "$REMOTE_SHA" ]; then
     echo "$REMOTE_SHA" > "$COMMIT_FILE"
 fi
 
-echo "=== [4/4] Перезапуск служб и очистка кэша LuCI ==="
+echo "=== [5/5] Перезапуск служб и очистка кэша LuCI ==="
 /etc/init.d/subparser restart >/dev/null 2>&1 || true
 
 EN=$(uci -q get subparser.settings.enabled)
