@@ -9,10 +9,11 @@ OUT_DIR="./dist"
 mkdir -p "$OUT_DIR"
 APK_FILE="${PKG_NAME}-${PKG_VER}-r${PKG_REL}.apk"
 
-# Если запуск внутри Alpine (в GitHub Actions), собираем напрямую через apk mkpkg
+# Если запуск происходит внутри Alpine с нативным apk mkpkg (например, в GitHub Actions)
 if command -v apk >/dev/null 2>&1 && apk --help 2>&1 | grep -q "mkpkg"; then
   echo "[*] Обнаружен нативный apk-tools, собираем пакет..."
   mkdir -p /tmp/scripts
+  
   cat << 'EOF' > /tmp/scripts/post-install
 #!/bin/sh
 /etc/init.d/subparser enable >/dev/null 2>&1 || true
@@ -45,8 +46,10 @@ exit 0
 EOF
   chmod 755 /tmp/scripts/pre-deinstall
 
+  # Запаковываем дерево файлов пакета
   tar -czf /tmp/data.tar.gz -C root .
 
+  # В apk-tools 3 архив передается позиционным аргументом в конце команды без флага --data
   apk mkpkg \
     --output "$OUT_DIR/$APK_FILE" \
     --info "name:$PKG_NAME" \
@@ -57,13 +60,13 @@ EOF
     --info "depends:python3 curl ca-certificates conntrack" \
     --script "post-install:/tmp/scripts/post-install" \
     --script "pre-deinstall:/tmp/scripts/pre-deinstall" \
-    --data /tmp/data.tar.gz
+    /tmp/data.tar.gz
 
-  echo "[OK] Пакет собран: $OUT_DIR/$APK_FILE"
+  echo "[OK] Пакет успешно собран: $OUT_DIR/$APK_FILE"
   exit 0
 fi
 
-# Если запуск локально на Windows и Docker запущен
+# Если запуск локально на ПК и запущен Docker
 if docker info >/dev/null 2>&1; then
   echo "[*] Сборка через Docker..."
   docker run --rm -v "$(pwd)":/work -w /work alpine:edge sh -c "
@@ -73,4 +76,4 @@ if docker info >/dev/null 2>&1; then
   exit 0
 fi
 
-echo "[!] Локальный Docker не запущен. Пакет соберется автоматически в GitHub Actions при пуше релиза."
+echo "[!] Локальный Docker не запущен. Пакет соберется автоматически в GitHub Actions при релизе."
