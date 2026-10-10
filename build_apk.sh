@@ -14,7 +14,6 @@ echo "[*] Сборка нативного пакета OpenWrt 25 через abu
 docker run --rm -v "$(pwd)":/work -w /work alpine:edge sh -e -c '
   apk update && apk add abuild apk-tools sudo
 
-  # 1. Генерация временных ключей для подписи пакета
   mkdir -p /root/.abuild
   abuild-keygen -a -n
 
@@ -22,7 +21,6 @@ docker run --rm -v "$(pwd)":/work -w /work alpine:edge sh -e -c '
   rm -rf "$BUILDDIR"
   mkdir -p "$BUILDDIR"
 
-  # 2. Создание хуков (имя должно строго совпадать: ${PKG_NAME}.post-install)
   cat << "EOF" > "$BUILDDIR/'"$PKG_NAME"'.post-install"
 #!/bin/sh
 /etc/init.d/subparser enable >/dev/null 2>&1 || true
@@ -53,7 +51,6 @@ rm -f "$CRON_TMP"
 exit 0
 EOF
 
-  # 3. Рецепт APKBUILD
   cat << EOF > "$BUILDDIR/APKBUILD"
 pkgname="'"$PKG_NAME"'"
 pkgver="'"$PKG_VER"'"
@@ -64,18 +61,20 @@ arch="noarch"
 license="MIT"
 depends="python3 curl ca-certificates conntrack"
 install="'"$PKG_NAME"'.post-install '"$PKG_NAME"'.pre-deinstall"
-options="!check"
+options="!check !openrc"
 
 package() {
   mkdir -p "\$pkgdir"
   cp -a /work/root/* "\$pkgdir/"
+  # Гарантируем права на выполнение для исполняемых скриптов и init-файлов
+  chmod 755 "\$pkgdir"/etc/init.d/*
+  chmod 755 "\$pkgdir"/usr/bin/*
 }
 EOF
 
   cd "$BUILDDIR"
   abuild -F -d
 
-  # Копируем созданный пакет в dist
   find /root/packages -name "*.apk" -exec cp {} /work/'"$OUT_DIR/$APK_FILE"' \;
   rm -rf "$BUILDDIR"
 '
