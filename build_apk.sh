@@ -14,8 +14,10 @@ echo "[*] Сборка нативного пакета OpenWrt 25 через abu
 docker run --rm -v "$(pwd)":/work -w /work alpine:edge sh -e -c '
   apk update && apk add abuild apk-tools sudo
 
-  mkdir -p /root/.abuild
+  # 1. Генерация ключей и добавление в доверенные для apk index
+  mkdir -p /root/.abuild /etc/apk/keys
   abuild-keygen -a -n
+  cp /root/.abuild/*.pub /etc/apk/keys/
 
   BUILDDIR="/tmp/subparser_apk_build"
   rm -rf "$BUILDDIR"
@@ -66,7 +68,6 @@ options="!check !openrc"
 package() {
   mkdir -p "\$pkgdir"
   cp -a /work/root/* "\$pkgdir/"
-  # Гарантируем права на выполнение для исполняемых скриптов и init-файлов
   chmod 755 "\$pkgdir"/etc/init.d/*
   chmod 755 "\$pkgdir"/usr/bin/*
 }
@@ -75,7 +76,8 @@ EOF
   cd "$BUILDDIR"
   abuild -F -d
 
-  find /root/packages -name "*.apk" -exec cp {} /work/'"$OUT_DIR/$APK_FILE"' \;
+  # Копируем готовый валидный apk в dist
+  find /root/packages -name "*.apk" -not -name "APKINDEX*" -exec cp {} /work/'"$OUT_DIR/$APK_FILE"' \;
   rm -rf "$BUILDDIR"
 '
 
