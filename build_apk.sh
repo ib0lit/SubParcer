@@ -9,24 +9,18 @@ OUT_DIR="./dist"
 mkdir -p "$OUT_DIR"
 APK_FILE="${PKG_NAME}-${PKG_VER}-r${PKG_REL}.apk"
 
-# 1. Если apk mkpkg уже доступен в системе
-if ! command -v apk >/dev/null 2>&1 || ! apk --help 2>&1 | grep -q "mkpkg"; then
-  echo "[*] Установка зависимостей и сборка нативного apk-tools 3..."
-  sudo apt-get update -qq
-  sudo apt-get install -y -qq meson ninja-build libssl-dev libzstd-dev zlib1g-dev scdoc
-  
-  TMP_SRC="/tmp/apk_tools_build"
-  rm -rf "$TMP_SRC"
-  git clone --depth 1 https://gitlab.alpinelinux.org/alpine/apk-tools.git "$TMP_SRC"
-  meson setup "$TMP_SRC/build" "$TMP_SRC" -Ddocs=disabled -Dhelp=disabled
-  ninja -C "$TMP_SRC/build"
-  sudo cp "$TMP_SRC/build/src/apk" /usr/local/bin/apk
-fi
+echo "[*] Сборка нативного ADB v3 пакета через Alpine Edge..."
 
-echo "[*] Сборка пакета через apk mkpkg..."
-mkdir -p /tmp/scripts
+# Запуск в официальном контейнере Alpine Edge с нативным apk-tools 3
+docker run --rm -v "$(pwd)":/work -w /work alpine:edge sh -e -c '
+  apk update && apk add apk-tools tar gzip
 
-cat << 'EOF' > /tmp/scripts/post-install
+  WORKDIR="/tmp/apk_work"
+  rm -rf "$WORKDIR"
+  mkdir -p "$WORKDIR"
+
+  # 1. Скрипты post-install и pre-deinstall
+  cat << "EOF" > "$WORKDIR/post-install"
 #!/bin/sh
 /etc/init.d/subparser enable >/dev/null 2>&1 || true
 /etc/init.d/subparser-bot enable >/dev/null 2>&1 || true
@@ -40,9 +34,9 @@ rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
 /etc/init.d/rpcd reload >/dev/null 2>&1 || true
 exit 0
 EOF
-chmod 755 /tmp/scripts/post-install
+  chmod 755 "$WORKDIR/post-install"
 
-cat << 'EOF' > /tmp/scripts/pre-deinstall
+  cat << "EOF" > "$WORKDIR/pre-deinstall"
 #!/bin/sh
 /etc/init.d/subparser stop >/dev/null 2>&1 || true
 /etc/init.d/subparser disable >/dev/null 2>&1 || true
@@ -56,21 +50,49 @@ rm -f "$CRON_TMP"
 /etc/init.d/cron restart >/dev/null 2>&1 || true
 exit 0
 EOF
-chmod 755 /tmp/scripts/pre-deinstall
+  chmod 755 "$WORKDIR/pre-deinstall"
 
-tar -czf /tmp/data.tar.gz -C root .
+  # 2. Формирование data-архива
+  tar -czf "$WORKDIR/data.tar.gz" -C root .
 
-apk mkpkg \
-  --output "$OUT_DIR/$APK_FILE" \
-  --info "name:$PKG_NAME" \
-  --info "version:${PKG_VER}-r${PKG_REL}" \
-  --info "description:LuCI interface and proxy parser for Podkop" \
-  --info "url:https://github.com/ib0lit/SubParser" \
-  --info "arch:all" \
-  --info "depends:python3 curl ca-certificates conntrack" \
-  --script "post-install:/tmp/scripts/post-install" \
-  --script "pre-deinstall:/tmp/scripts/pre-deinstall" \
-  /tmp/data.tar.gz
+  # 3. Формирование control-архива (.PKGINFO + хуки)
+  cat << EOF > "$WORKDIR/.PKGINFO"
+pkgname = '"$PKG_NAME"'
+pkgver = '"$PKG_VER-r$PKG_REL"'
+pkgdesc = LuCI interface and proxy parser for Podkop (SubParser)
+url = https://github.com/ib0lit/SubParser
+builddate = $(date +%s)
+packager = ib0lit
+size = $(du -sb root | awk "{print \$1}")
+arch = all
+origin = '"$PKG_NAME"'
+depend = python3 curl ca-certificates conntrack
+EOF
+
+  tar -czf "$WORKDIR/control.tar.gz" -C "$WORKDIR" .PKGINFO post-install pre-deinstall
+
+  # 4. Сборка валидного контейнера ADB v3 через apk mkpkg
+  apk mkpkg \
+    --output "'"$OUT_DIR/$APK_FILE"'" \
+    --info "name:'"$PKG_NAME"'" \
+    --info "version:'"${PKG_VER}-r${PKG_REL}"'" \
+    --info "description:LuCI interface and proxy parser for Podkop" \
+    --info "url:https://github.com/ib0lit/SubParser" \
+    --info "arch:all" \
+    --info "depends:python3 curl ca-certificates conntrack" \
+    --script "post-install:$WORKDIR/post-install" \
+    --script "pre-deinstall:$WORKDIR/pre-deinstall" \
+    --data "$WORKDIR/data.tar.gz" 2>/dev/null || \
+  apk mkpkg \
+    -o "'"$OUT_DIR/$APK_FILE"'" \
+    -I "name:'"$PKG_NAME"'" \
+    -I "version:'"${PKG_VER}-r${PKG_REL}"'" \
+    -I "arch:all" \
+    -I "depends:python3 curl ca-certificates conntrack" \
+    "$WORKDIR/control.tar.gz" \
+    "$WORKDIR/data.tar.gz"
+
+  rm -rf "$WORKDIR"
+'
 
 ls -lh "$OUT_DIR/$APK_FILE"
-echo "[OK] Пакет собран: $OUT_DIR/$APK_FILE"
