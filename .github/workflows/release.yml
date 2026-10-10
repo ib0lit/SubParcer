@@ -12,12 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: alpine:edge
     steps:
-      - name: Install build tools
-        run: apk update && apk add git tar gzip apk-tools bash coreutils
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
