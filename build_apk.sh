@@ -9,11 +9,17 @@ OUT_DIR="./dist"
 mkdir -p "$OUT_DIR"
 APK_FILE="${PKG_NAME}-${PKG_VER}-r${PKG_REL}.apk"
 
-# Если запуск внутри Alpine с apk-tools (GitHub Actions)
 if command -v apk >/dev/null 2>&1 && apk --help 2>&1 | grep -q "mkpkg"; then
   echo "[*] Обнаружен нативный apk-tools, собираем пакет..."
-  mkdir -p /tmp/scripts
+  BUILD_TMP="/tmp/pkg_root_$$"
+  rm -rf "$BUILD_TMP"
+  mkdir -p "$BUILD_TMP"
   
+  # Копируем всё дерево файлов пакета
+  cp -a root/* "$BUILD_TMP/"
+  
+  # Создаем скрипты
+  mkdir -p /tmp/scripts
   cat << 'EOF' > /tmp/scripts/post-install
 #!/bin/sh
 /etc/init.d/subparser enable >/dev/null 2>&1 || true
@@ -46,9 +52,12 @@ exit 0
 EOF
   chmod 755 /tmp/scripts/pre-deinstall
 
-  # В apk mkpkg передается tar-поток через stdin или напрямую каталог с файлами!
-  # Пакуем содержимое root и подаем в stdin apk mkpkg:
-  tar -c -C root . | apk mkpkg \
+  # Собираем tar с файлами данных
+  mkdir -p /tmp/data_build
+  tar -czf /tmp/data_build/data.tar.gz -C "$BUILD_TMP" .
+
+  # Вызов apk mkpkg: передаем data.tar.gz как архив или каталог
+  apk mkpkg \
     --output "$OUT_DIR/$APK_FILE" \
     --info "name:$PKG_NAME" \
     --info "version:${PKG_VER}-r${PKG_REL}" \
@@ -57,14 +66,27 @@ EOF
     --info "arch:all" \
     --info "depends:python3 curl ca-certificates conntrack" \
     --script "post-install:/tmp/scripts/post-install" \
-    --script "pre-deinstall:/tmp/scripts/pre-deinstall"
+    --script "pre-deinstall:/tmp/scripts/pre-deinstall" \
+    --files /tmp/data_build/data.tar.gz 2>/dev/null || \
+  apk mkpkg \
+    --output "$OUT_DIR/$APK_FILE" \
+    --info "name:$PKG_NAME" \
+    --info "version:${PKG_VER}-r${PKG_REL}" \
+    --info "description:LuCI interface and proxy parser for Podkop" \
+    --info "url:https://github.com/ib0lit/SubParser" \
+    --info "arch:all" \
+    --info "depends:python3 curl ca-certificates conntrack" \
+    --script "post-install:/tmp/scripts/post-install" \
+    --script "pre-deinstall:/tmp/scripts/pre-deinstall" \
+    "$BUILD_TMP"
 
-  echo "[OK] Пакет успешно собран: $OUT_DIR/$APK_FILE"
+  rm -rf "$BUILD_TMP" /tmp/data_build
+  ls -lh "$OUT_DIR/$APK_FILE"
+  echo "[OK] Пакет собран: $OUT_DIR/$APK_FILE"
   exit 0
 fi
 
 if docker info >/dev/null 2>&1; then
-  echo "[*] Сборка через Docker..."
   docker run --rm -v "$(pwd)":/work -w /work alpine:edge sh -c "
     apk update && apk add apk-tools tar gzip
     ./build_apk.sh
@@ -72,4 +94,4 @@ if docker info >/dev/null 2>&1; then
   exit 0
 fi
 
-echo "[!] Локальный Docker не запущен. Пакет соберется автоматически в GitHub Actions при релизе."
+echo "[!] Локальный Docker не запущен."
