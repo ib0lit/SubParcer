@@ -648,7 +648,15 @@ def main():
         update_live_progress("♻️ [4/4] Обновление Podkop...", "Запись серверов в UCI и перезапуск службы...")
         time.sleep(1)
         subprocess.run(["/etc/init.d/podkop", "restart"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        print(f"Podkop успешно обновлен!")
+        # Адаптивное ожидание завершения работы Podkop (до 10 минут)
+        wait_cycles = 0
+        while wait_cycles < 300:
+            ps = subprocess.run(["pgrep", "-f", "podkop"], stdout=subprocess.PIPE, text=True)
+            if not ps.stdout.strip():
+                break
+            time.sleep(2)
+            wait_cycles += 1
+        print("Podkop успешно обновлен!")
 
         proto_counts = {}
         for l in best:

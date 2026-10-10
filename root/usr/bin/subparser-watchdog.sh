@@ -4,7 +4,7 @@ ENABLED=$(uci -q get subparser.settings.enabled)
 [ "$ENABLED" = "1" ] || exit 0
 
 # Защита: если парсер активен или идет фоновая синхронизация — не вмешиваемся
-if pgrep -f "subparser.py" >/dev/null 2>&1 || pgrep -f "subparser-helper.sh" >/dev/null 2>&1 || [ -f "/var/run/subparser.lock" ]; then
+if pgrep -f "subparser.py" >/dev/null 2>&1 || pgrep -f "subparser-helper.sh" >/dev/null 2>&1 || pgrep -f "podkop" >/dev/null 2>&1 || [ -f "/var/run/subparser.lock" ] || [ -f "/tmp/podkop.lock" ]; then
     exit 0
 fi
 
@@ -132,6 +132,19 @@ TARGET_GROUP="main-urltest-out"
 if ! curl -s -m 3 "http://${API_HOST}/proxies/${TARGET_GROUP}" | grep -q '"name"'; then
     FALLBACK=$(curl -s -m 3 "http://${API_HOST}/proxies" | grep -o '"[a-zA-Z0-9_-]*urltest[a-zA-Z0-9_-]*"' | tr -d '"' | head -n 1)
     [ -n "$FALLBACK" ] && TARGET_GROUP="$FALLBACK"
+
+# Защита: если sing-box поднят менее 35 секунд назад — пропускаем раунд
+SB_PID=$(pidof sing-box 2>/dev/null | awk '{print $1}')
+if [ -n "$SB_PID" ] && [ -d "/proc/$SB_PID" ]; then
+    UPTIME_SYS=$(cut -d'.' -f1 /proc/uptime)
+    START_TIME_TICKS=$(cut -d' ' -f22 "/proc/$SB_PID/stat" 2>/dev/null || echo 0)
+    CLK_TCK=$(getconf CLK_TCK 2>/dev/null || echo 100)
+    PROC_START_SEC=$((START_TIME_TICKS / CLK_TCK))
+    PROC_AGE=$((UPTIME_SYS - PROC_START_SEC))
+    if [ "$PROC_AGE" -ge 0 ] && [ "$PROC_AGE" -lt 35 ]; then
+        exit 0
+    fi
+fi
 fi
 
 [ -z "$TARGET_GROUP" ] && exit 0

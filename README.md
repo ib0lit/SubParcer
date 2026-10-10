@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/sing--box-1.8+-E34F26?style=flat-square" alt="sing-box" />
   <img src="https://img.shields.io/badge/Telegram_Bot-Ready-24A1DE?style=flat-square&logo=telegram&logoColor=white" alt="Telegram Bot" />
   <img src="https://img.shields.io/badge/LuCI-Integrated-00D26A?style=flat-square" alt="LuCI" />
-  <img src="https://img.shields.io/badge/Version-v2.1.5-blueviolet?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/Version-v2.1.6-blueviolet?style=flat-square" alt="Version" />
 </p>
 
 > [!CAUTION]
@@ -18,6 +18,22 @@
 > Если вы каким-то чудом наткнулись на этот репозиторий и у вас что-то не заводится, отваливается или не работает так, как задумано автором — простите, извините, спасибо, пожалуйста.  
 > Никаких гарантий стабильности нет, используйте исключительно на свой страх и риск.  
 > О проблемах можете писать в чате TG канала, возможно попробуем пофиксить.
+
+---
+
+## 🧪 Протестированные конфигурации
+
+Работоспособность гарантированно проверялась автором только на следующих связках компонентов. Поведение на других версиях не исследовалось.
+
+| Компонент | Проверенные версии / Сборки |
+| :--- | :--- |
+| **Устройство** | Xiaomi Mi Router AX3000T |
+| **Версия OpenWrt** | `24.10.8` (r29233-443ec4032a), `25.12.5` (r33051-f5dae5ece4) |
+| **Podkop & LuCI App** | `v0.7.22` |
+| **sing-box (extended)** | `1.14.0-extended-2.7.0`, `1.14.1-extended-2.7.1`, `1.14.1-extended-2.7.2` |
+
+> 💬 **Делитесь отчетами о тестах!**  
+> Если вы протестировали работу SubParser на другом роутере, архитектуре или версии OpenWrt — напишите об этом в специальной ветке **«Репорты работоспособности»** [Telegram-чата](https://t.me/SubParserChat). Это поможет составить общую базу совместимости.
 
 ---
 
