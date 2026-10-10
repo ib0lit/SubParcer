@@ -31,7 +31,7 @@ from subparser.screens import (
     get_log_screen, get_logread_screen, get_main_screen,
     get_parser_menu_screen, get_reboot_confirm_screen,
     get_sections_menu_screen, get_sections_selector_screen,
-    get_servers_screen, get_services_status_screen, get_status_screen,
+    get_servers_screen, get_services_status_screen, get_status_screen, get_system_metrics,
     get_sub_card_screen, get_sub_delete_confirm_screen, get_subs_list_screen
 )
 

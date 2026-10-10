@@ -3,8 +3,8 @@
 ENABLED=$(uci -q get subparser.settings.enabled)
 [ "$ENABLED" = "1" ] || exit 0
 
-# Если парсер уже запущен — не вмешиваемся
-if pgrep -f "subparser.py" >/dev/null 2>&1; then
+# Защита: если парсер активен или идет фоновая синхронизация — не вмешиваемся
+if pgrep -f "subparser.py" >/dev/null 2>&1 || pgrep -f "subparser-helper.sh" >/dev/null 2>&1 || [ -f "/var/run/subparser.lock" ]; then
     exit 0
 fi
 
@@ -21,15 +21,15 @@ notify() {
         -d "parse_mode=HTML" >/dev/null 2>&1
 }
 
-# 1. Помехоустойчивая проверка интернета (WAN): 3 пакета, достаточно 1 ответа
+# 1. Помехоустойчивая проверка WAN
 check_wan_alive() {
-    if ping -c 3 -W 1 77.88.8.8 >/dev/null 2>&1 || ping -c 3 -W 1 1.1.1.1 >/dev/null 2>&1; then
+    if ping -c 2 -W 2 77.88.8.8 >/dev/null 2>&1 || ping -c 2 -W 2 1.1.1.1 >/dev/null 2>&1; then
         return 0
     fi
     return 1
 }
 
-# 2. Мониторинг лимитов подписок (раз в 24 часа)
+# 2. Мониторинг лимитов подписок
 check_sub_limits() {
     [ -f "/tmp/subparser_subinfo.json" ] || return 0
     local alert_file="/tmp/subparser_sub_alerts.json"
@@ -107,17 +107,20 @@ if warns:
 }
 check_sub_limits
 
-# 3. Контроль зависания процесса sing-box
+# 3. Контроль процесса sing-box с защитой от переходных процессов
 if ! pidof sing-box >/dev/null 2>&1; then
-    if ! check_wan_alive; then
+    sleep 10
+    if ! pidof sing-box >/dev/null 2>&1; then
+        if ! check_wan_alive; then
+            exit 0
+        fi
+        notify "🚨 <b>Внимание: Podkop упал!</b>%0AСлужба sing-box не активна. Перезапускаю Podkop..."
+        /etc/init.d/podkop restart >/dev/null 2>&1
         exit 0
     fi
-    notify "🚨 <b>Внимание: Podkop упал!</b>%0AСлужба sing-box не активна. Перезапускаю Podkop..."
-    /etc/init.d/podkop restart >/dev/null 2>&1
-    sleep 4
 fi
 
-# 4. Проверка доступности прокси-ядра
+# 4. Проверка доступности REST API ядра
 API_HOST="192.168.1.1:9090"
 if ! curl -s -m 2 "http://${API_HOST}/proxies" >/dev/null 2>&1; then
     LAN_IP=$(uci -q get network.lan.ipaddr | cut -d'/' -f1)
@@ -126,8 +129,8 @@ fi
 
 TEST_URL="https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204"
 TARGET_GROUP="main-urltest-out"
-if ! curl -s "http://${API_HOST}/proxies/${TARGET_GROUP}" | grep -q '"name"'; then
-    FALLBACK=$(curl -s "http://${API_HOST}/proxies" | grep -o '"[a-zA-Z0-9_-]*urltest[a-zA-Z0-9_-]*"' | tr -d '"' | head -n 1)
+if ! curl -s -m 3 "http://${API_HOST}/proxies/${TARGET_GROUP}" | grep -q '"name"'; then
+    FALLBACK=$(curl -s -m 3 "http://${API_HOST}/proxies" | grep -o '"[a-zA-Z0-9_-]*urltest[a-zA-Z0-9_-]*"' | tr -d '"' | head -n 1)
     [ -n "$FALLBACK" ] && TARGET_GROUP="$FALLBACK"
 fi
 
@@ -135,11 +138,11 @@ fi
 
 check_delay() {
     local resp
-    resp=$(curl -s -m 5 "http://${API_HOST}/proxies/${TARGET_GROUP}/delay?url=${TEST_URL}&timeout=3500" 2>/dev/null)
+    resp=$(curl -s -m 8 "http://${API_HOST}/proxies/${TARGET_GROUP}/delay?url=${TEST_URL}&timeout=4000" 2>/dev/null)
     echo "$resp" | grep -o '"delay":[0-9]*' | cut -d':' -f2
 }
 
-# Серия из 3 попыток (0с -> 7с -> 7с) для отсеивания кратковременных просадок
+# Серия проверок с фильтрацией микросбоев
 DELAY=""
 ATTEMPT=1
 while [ "$ATTEMPT" -le 3 ]; do
@@ -148,12 +151,23 @@ while [ "$ATTEMPT" -le 3 ]; do
         break
     fi
     if [ "$ATTEMPT" -lt 3 ]; then
-        sleep 7
+        sleep 5
     fi
     ATTEMPT=$((ATTEMPT + 1))
 done
 
-# 5. Обработка сбоев и 45-минутный кулдаун
+# Если связь через узел есть — сбрасываем счетчик ошибок и выходим
+if [ -n "$DELAY" ] && [ "$DELAY" -gt 0 ]; then
+    rm -f "$STATE_FILE" 2>/dev/null
+    exit 0
+fi
+
+# Если упал сам интернет провайдера — не трогаем прокси
+if ! check_wan_alive; then
+    exit 0
+fi
+
+# 5. Двухэтапное подтверждение аварии
 NOW=$(date +%s)
 FAIL_COUNT=0
 LAST_RETRY=0
@@ -166,25 +180,19 @@ fi
 case "$FAIL_COUNT" in ''|*[!0-9]*) FAIL_COUNT=0 ;; esac
 case "$LAST_RETRY" in ''|*[!0-9]*) LAST_RETRY=0 ;; esac
 
-# Если задержка в норме — сбрасываем статус сбоя
-if [ -n "$DELAY" ] && [ "$DELAY" -gt 0 ]; then
-    rm -f "$STATE_FILE" 2>/dev/null
+# Если это первый сбой — фиксируем и даем ядру 1 цикл (5 мин) на самовосстановление
+if [ "$FAIL_COUNT" -lt 1 ]; then
+    printf "%s\n%s\n" "1" "$NOW" > "$STATE_FILE"
     exit 0
 fi
 
-# Если интернет у провайдера отсутствует — тихо выходим
-if ! check_wan_alive; then
-    exit 0
-fi
-
-# Кулдаун: если экстренный парсинг уже запускался менее 45 минут (2700 сек) назад
+# Кулдаун 45 минут (2700 сек) между экстренными парсингами
 ELAPSED=$((NOW - LAST_RETRY))
-if [ "$FAIL_COUNT" -ge 1 ] && [ "$ELAPSED" -lt 2700 ] && [ "$ELAPSED" -ge 0 ]; then
+if [ "$ELAPSED" -lt 2700 ] && [ "$ELAPSED" -ge 0 ]; then
     exit 0
 fi
 
-FAIL_COUNT=$((FAIL_COUNT + 1))
-printf "%s\n%s\n" "$FAIL_COUNT" "$NOW" > "$STATE_FILE"
+printf "%s\n%s\n" "2" "$NOW" > "$STATE_FILE"
 
 notify "⚠️ <b>Сбой проксирования Podkop!</b>%0AГруппа [${TARGET_GROUP}] не отвечает. Запускаю экстренный отбор узлов..."
 rm -f /var/run/subparser.lock

@@ -153,7 +153,7 @@ sh -c "$(curl -sL https://raw.githubusercontent.com/ib0lit/SubParser/main/uninst
     │   ├── init.d/
     │   │   ├── subparser                     # Служба управления cron-задачами
     │   │   └── subparser-bot                 # procd-демон Telegram-бота
-    │   └── subparser_version                 # Текущая версия пакета (2.1.4)
+    │   └── subparser_version                 # Текущая версия пакета (2.1.5)
     ├── usr/
     │   ├── bin/
     │   │   ├── subparser.py                  # Ядро парсинга и стресс-тестирования
