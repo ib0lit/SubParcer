@@ -155,19 +155,16 @@ check_delay() {
     echo "$resp" | grep -o '"delay":[0-9]*' | cut -d':' -f2
 }
 
-# Серия проверок с фильтрацией микросбоев
-DELAY=""
-ATTEMPT=1
-while [ "$ATTEMPT" -le 3 ]; do
+# Серия проверок: если первый замер упал — принудительно триггерим пересчет группы
+DELAY=$(check_delay)
+
+if [ -z "$DELAY" ] || [ "$DELAY" -le 0 ]; then
+    # Принудительно заставляем ядро протестировать всю группу и выбрать живой сервер
+    curl -s -m 6 "http://${API_HOST}/group/${TARGET_GROUP}/delay?url=${TEST_URL}&timeout=3000" >/dev/null 2>&1
+    sleep 2
+    # Повторный контрольный замер
     DELAY=$(check_delay)
-    if [ -n "$DELAY" ] && [ "$DELAY" -gt 0 ]; then
-        break
-    fi
-    if [ "$ATTEMPT" -lt 3 ]; then
-        sleep 5
-    fi
-    ATTEMPT=$((ATTEMPT + 1))
-done
+fi
 
 # Если связь через узел есть — сбрасываем счетчик ошибок и выходим
 if [ -n "$DELAY" ] && [ "$DELAY" -gt 0 ]; then
