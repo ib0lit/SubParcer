@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 *.pyo
 SubParser.zip
+# Build artifacts
+dist/
