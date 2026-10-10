@@ -11,14 +11,8 @@ APK_FILE="${PKG_NAME}-${PKG_VER}-r${PKG_REL}.apk"
 
 if command -v apk >/dev/null 2>&1 && apk --help 2>&1 | grep -q "mkpkg"; then
   echo "[*] Обнаружен нативный apk-tools, собираем пакет..."
-  BUILD_TMP="/tmp/pkg_root_$$"
-  rm -rf "$BUILD_TMP"
-  mkdir -p "$BUILD_TMP"
   
-  # Копируем всё дерево файлов пакета
-  cp -a root/* "$BUILD_TMP/"
-  
-  # Создаем скрипты
+  # 1. Подготовка скриптов пост/пре-установки
   mkdir -p /tmp/scripts
   cat << 'EOF' > /tmp/scripts/post-install
 #!/bin/sh
@@ -52,13 +46,15 @@ exit 0
 EOF
   chmod 755 /tmp/scripts/pre-deinstall
 
-  # Собираем tar с файлами данных
-  mkdir -p /tmp/data_build
-  tar -czf /tmp/data_build/data.tar.gz -C "$BUILD_TMP" .
+  # 2. Переходим в директорию root, чтобы пути файлов были относительными
+  cd root
 
-  # Вызов apk mkpkg: передаем data.tar.gz как архив или каталог
+  # 3. Вызываем apk mkpkg, передавая список всех файлов проекта как аргументы
+  # Именно передача списка файлов включает их в блок данных ADB v3
+  FILES=$(find . -type f | sed 's|^\./||')
+
   apk mkpkg \
-    --output "$OUT_DIR/$APK_FILE" \
+    --output "../$OUT_DIR/$APK_FILE" \
     --info "name:$PKG_NAME" \
     --info "version:${PKG_VER}-r${PKG_REL}" \
     --info "description:LuCI interface and proxy parser for Podkop" \
@@ -67,22 +63,13 @@ EOF
     --info "depends:python3 curl ca-certificates conntrack" \
     --script "post-install:/tmp/scripts/post-install" \
     --script "pre-deinstall:/tmp/scripts/pre-deinstall" \
-    --files /tmp/data_build/data.tar.gz 2>/dev/null || \
-  apk mkpkg \
-    --output "$OUT_DIR/$APK_FILE" \
-    --info "name:$PKG_NAME" \
-    --info "version:${PKG_VER}-r${PKG_REL}" \
-    --info "description:LuCI interface and proxy parser for Podkop" \
-    --info "url:https://github.com/ib0lit/SubParser" \
-    --info "arch:all" \
-    --info "depends:python3 curl ca-certificates conntrack" \
-    --script "post-install:/tmp/scripts/post-install" \
-    --script "pre-deinstall:/tmp/scripts/pre-deinstall" \
-    "$BUILD_TMP"
+    $FILES
 
-  rm -rf "$BUILD_TMP" /tmp/data_build
+  cd ..
+  
+  # Проверка размера готового файла
   ls -lh "$OUT_DIR/$APK_FILE"
-  echo "[OK] Пакет собран: $OUT_DIR/$APK_FILE"
+  echo "[OK] Пакет успешно собран: $OUT_DIR/$APK_FILE"
   exit 0
 fi
 
