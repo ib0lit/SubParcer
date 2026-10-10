@@ -14,7 +14,7 @@ echo "[*] Сборка нативного пакета OpenWrt 25 через abu
 docker run --rm -v "$(pwd)":/work -w /work alpine:edge sh -e -c '
   apk update && apk add abuild apk-tools sudo
 
-  # 1. Генерация временных ключей сборки для подписи ADB пакета
+  # 1. Генерация временных ключей для подписи пакета
   mkdir -p /root/.abuild
   abuild-keygen -a -n
 
@@ -22,8 +22,8 @@ docker run --rm -v "$(pwd)":/work -w /work alpine:edge sh -e -c '
   rm -rf "$BUILDDIR"
   mkdir -p "$BUILDDIR"
 
-  # 2. Создание хуков post-install и pre-deinstall
-  cat << "EOF" > "$BUILDDIR/subparser.post-install"
+  # 2. Создание хуков (имя должно строго совпадать: ${PKG_NAME}.post-install)
+  cat << "EOF" > "$BUILDDIR/'"$PKG_NAME"'.post-install"
 #!/bin/sh
 /etc/init.d/subparser enable >/dev/null 2>&1 || true
 /etc/init.d/subparser-bot enable >/dev/null 2>&1 || true
@@ -38,7 +38,7 @@ rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
 exit 0
 EOF
 
-  cat << "EOF" > "$BUILDDIR/subparser.pre-deinstall"
+  cat << "EOF" > "$BUILDDIR/'"$PKG_NAME"'.pre-deinstall"
 #!/bin/sh
 /etc/init.d/subparser stop >/dev/null 2>&1 || true
 /etc/init.d/subparser disable >/dev/null 2>&1 || true
@@ -63,7 +63,7 @@ url="https://github.com/ib0lit/SubParser"
 arch="noarch"
 license="MIT"
 depends="python3 curl ca-certificates conntrack"
-install="subparser.post-install subparser.pre-deinstall"
+install="'"$PKG_NAME"'.post-install '"$PKG_NAME"'.pre-deinstall"
 options="!check"
 
 package() {
@@ -75,7 +75,7 @@ EOF
   cd "$BUILDDIR"
   abuild -F -d
 
-  # Копируем полученный .apk в папку dist
+  # Копируем созданный пакет в dist
   find /root/packages -name "*.apk" -exec cp {} /work/'"$OUT_DIR/$APK_FILE"' \;
   rm -rf "$BUILDDIR"
 '
